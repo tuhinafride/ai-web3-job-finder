@@ -8,15 +8,17 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
 from ..classify import html_to_text
 from ..config import get_settings
+from . import llm
 
 log = logging.getLogger("search")
 UA = {"User-Agent": "Mozilla/5.0 (compatible; Web3JobFinder/1.0; +https://web3-job-finder.onrender.com)"}
@@ -65,8 +67,10 @@ def configured() -> dict:
     st = get_settings()
     return {
         "google": "serper" if st.serper_api_key else "brave" if st.brave_api_key else "",
-        "x": "x_api" if st.x_bearer_token else "twitterapi_io" if st.twitterapi_io_key else "",
-        "llm": bool(st.llm_api_key),
+        "x": "grok" if st.xai_api_key else "x_api" if st.x_bearer_token else "twitterapi_io" if st.twitterapi_io_key else "",
+        "llm": llm.enabled("qualify") or llm.enabled("draft"),
+        "llm_draft": llm.provider_name("draft"),
+        "llm_qualify": llm.provider_name("qualify"),
     }
 
 
@@ -130,6 +134,8 @@ X_ROLE_QUERY = ('(hiring OR "we are hiring" OR "looking for" OR "we\'re looking"
 async def x_search(query: str = "", max_results: int = 25) -> list[RawLead]:
     st = get_settings()
     q = query or X_ROLE_QUERY
+    if st.xai_api_key:
+        return await grok_x_search(query, max_results)
     async with httpx.AsyncClient(timeout=25) as c:
         if st.x_bearer_token:
             r = await c.get("https://api.x.com/2/tweets/search/recent",
@@ -166,7 +172,92 @@ async def x_search(query: str = "", max_results: int = 25) -> list[RawLead]:
                                    project=a.get("name", ""), posted_at=_parse_dt(t.get("createdAt")),
                                    author_x=uname, author_name=a.get("name", ""), checked=True))
             return out
-    raise ProviderError("No X API key configured (X_BEARER_TOKEN or TWITTERAPI_IO_KEY)")
+    raise ProviderError("No X key configured (XAI_API_KEY, X_BEARER_TOKEN or TWITTERAPI_IO_KEY)")
+
+
+GROK_X_PROMPT = """Use X search to find recent X posts (last {days} days) where a Web3 / crypto project or a person
+is HIRING for one of: moderator, community manager, customer support, social media manager, business development /
+growth, community operations, ambassador or contributor roles. {extra}
+Only include posts you actually fetched with the search tool. Never invent posts, handles or links.
+Return ONLY JSON: {{"posts": [{{"url": "https://x.com/<handle>/status/<id>", "author": "<handle without @>",
+"name": "<display name>", "text": "<the post text, verbatim>", "date": "YYYY-MM-DD", "author_bio": "<bio if seen>"}}]}}
+Up to {n} posts, newest first."""
+
+_STATUS_RE = re.compile(r"https?://(?:x|twitter)\.com/([A-Za-z0-9_]{1,15})/status(?:es)?/(\d+)")
+
+
+def _grok_citations(data: dict) -> set[str]:
+    """Every URL Grok's tools actually returned (top-level citations + url_citation annotations)."""
+    urls = set(data.get("citations") or [])
+    for item in data.get("output") or []:
+        for part in item.get("content") or []:
+            for a in part.get("annotations") or []:
+                if a.get("url"):
+                    urls.add(a["url"])
+    ids = set()
+    for u in urls:
+        m = _STATUS_RE.search(u if isinstance(u, str) else str(u))
+        if m:
+            ids.add(m.group(2))
+    return ids
+
+
+def _grok_text(data: dict) -> str:
+    if data.get("output_text"):
+        return data["output_text"]
+    out = []
+    for item in data.get("output") or []:
+        if item.get("type") == "message":
+            for part in item.get("content") or []:
+                if part.get("type") in ("output_text", "text"):
+                    out.append(part.get("text", ""))
+    return "\n".join(out)
+
+
+async def grok_x_search(query: str = "", max_results: int = 25, days: int = 14) -> list[RawLead]:
+    """X search through xAI Grok's x_search tool. Keeps only posts Grok's tool really cited."""
+    st = get_settings()
+    today = datetime.utcnow().date()
+    prompt = GROK_X_PROMPT.format(days=days, n=max_results,
+                                  extra=f"Focus on: {query}" if query and query != X_ROLE_QUERY else "")
+    body = {
+        "model": st.xai_model,
+        "input": [{"role": "user", "content": prompt}],
+        "tools": [{"type": "x_search",
+                   "from_date": (today - timedelta(days=days)).isoformat(),
+                   "to_date": (today + timedelta(days=1)).isoformat()}],
+        "max_turns": 3,
+    }
+    async with httpx.AsyncClient(timeout=180) as c:
+        r = await c.post("https://api.x.ai/v1/responses", json=body,
+                         headers={"Authorization": f"Bearer {st.xai_api_key}"})
+    if r.status_code != 200:
+        raise ProviderError(f"Grok HTTP {r.status_code}")
+    data = r.json()
+    cited = _grok_citations(data)
+    m = re.search(r"\{.*\}", _grok_text(data), re.S)
+    try:
+        posts = (json.loads(m.group(0)) if m else {}).get("posts") or []
+    except json.JSONDecodeError:
+        posts = []
+    out, seen = [], set()
+    for p in posts[:max_results]:
+        mm = _STATUS_RE.search(str(p.get("url", "")))
+        if not mm or mm.group(2) in seen:
+            continue
+        sid = mm.group(2)
+        seen.add(sid)
+        if cited and sid not in cited:
+            continue   # Grok named a post its search never returned: drop it
+        uname = (p.get("author") or mm.group(1)).lstrip("@")
+        text = str(p.get("text", ""))[:4000]
+        if p.get("author_bio"):
+            text += "\n\nAuthor bio: " + str(p["author_bio"])[:500]
+        out.append(RawLead("x", f"https://x.com/{uname}/status/{sid}", "", text,
+                           project=str(p.get("name", "")), posted_at=_parse_dt(p.get("date")),
+                           author_x=uname, author_name=str(p.get("name", "")),
+                           checked=sid in cited))   # only "checked" when Grok's search tool cited it
+    return out
 
 
 # ------------------------------------------------------------------ Telegram public channels
