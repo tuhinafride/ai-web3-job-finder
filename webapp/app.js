@@ -27,7 +27,12 @@
       headers: { "Content-Type": "application/json", "X-Telegram-Init-Data": initData, ...(opts.headers || {}) },
     });
     if (res.status === 401) { $("#gate").classList.remove("hidden"); throw new Error("auth"); }
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const err = new Error(body.detail || res.statusText);
+      err.code = body.code || ""; err.status = res.status;
+      throw err;
+    }
     return res.json();
   }
 
@@ -222,6 +227,108 @@
     } catch (e) { if (e.message !== "auth") toast("Could not save"); }
   };
 
+  // ------------------------------------------------ personal account login (owner only)
+  const show = (id, on) => $(id).classList.toggle("hidden", !on);
+  let acct = null;
+
+  function setStatus(color, title, sub) {
+    $("#acct-dot").className = "dot " + color;
+    $("#acct-title").textContent = title;
+    $("#acct-sub").textContent = sub || "";
+  }
+
+  function renderAccount() {
+    ["#acct-locked", "#acct-api", "#acct-login", "#acct-connected"].forEach((x) => show(x, false));
+    if (!state.isAdmin) {
+      setStatus("", "Locked", "");
+      $("#my-id").textContent = String(state.userId || "…");
+      show("#acct-locked", true);
+      return;
+    }
+    const a = acct || {};
+    if (!a.configured) { setStatus("", "Server not ready", "SESSION_ENC_KEY / WEBHOOK_SECRET is missing on the server."); return; }
+    if (a.connected) {
+      const who = [a.account.name, a.account.username ? "@" + a.account.username : ""].filter(Boolean).join(" · ");
+      setStatus("on", "Connected", `${who} · ${a.account.phone}`);
+      show("#acct-connected", true);
+      return;
+    }
+    if (!a.api_ready) { setStatus("", "Not connected", "Add your API keys to start."); show("#acct-api", true); return; }
+    setStatus(a.stage ? "wait" : "", a.stage ? "Login in progress" : "Not connected",
+      a.stage ? `Code sent to ${a.phone || "your Telegram"}` : "Tap the button to sign in with your phone number.");
+    show("#acct-login", true);
+    showStep(a.stage || "");
+  }
+
+  function showStep(stage) {
+    show("#login-start", !stage && !$("#step-phone").dataset.open);
+    show("#step-phone", !stage && !!$("#step-phone").dataset.open);
+    show("#step-code", stage === "code");
+    show("#step-password", stage === "password");
+    show("#login-cancel", !!stage || !!$("#step-phone").dataset.open);
+  }
+
+  async function loadAccount() {
+    if (!state.isAdmin) { renderAccount(); return; }
+    try { acct = await api("/api/account/status"); }
+    catch (e) { if (e.message !== "auth") setStatus("", "Couldn't reach the server", e.message); return; }
+    renderAccount();
+  }
+
+  async function busy(btn, fn) {
+    if (btn.disabled) return;
+    btn.disabled = true; const label = btn.textContent; btn.textContent = "Please wait…";
+    try { await fn(); } catch (e) { if (e.message !== "auth") toast(e.message || "Something went wrong"); }
+    finally { btn.disabled = false; btn.textContent = label; }
+  }
+
+  $("#api-help").onclick = () => openLink("https://my.telegram.org/apps");
+  $("#api-save").onclick = (ev) => busy(ev.target, async () => {
+    acct = await api("/api/account/api-credentials", { method: "POST",
+      body: JSON.stringify({ api_id: $("#api-id").value.trim(), api_hash: $("#api-hash").value.trim() }) });
+    $("#api-hash").value = "";
+    toast("API keys saved 🔒"); renderAccount();
+  });
+  $("#login-start").onclick = () => { $("#step-phone").dataset.open = "1"; showStep(""); $("#phone").focus(); };
+  $("#phone-send").onclick = (ev) => busy(ev.target, async () => {
+    const r = await api("/api/account/send-code", { method: "POST", body: JSON.stringify({ phone: $("#phone").value }) });
+    const where = r.delivery === "sms" ? "by SMS" : r.delivery === "call" ? "by phone call" : "in your Telegram app (chat \"Telegram\")";
+    $("#code-hint").textContent = `Telegram sent a code ${where} to ${r.phone}.`;
+    delete $("#step-phone").dataset.open;
+    acct = { ...acct, stage: "code", phone: r.phone }; renderAccount(); $("#code").focus();
+  });
+  async function afterLogin(r) {
+    if (r.stage === "password") { acct = { ...acct, stage: "password" }; renderAccount(); $("#password").focus(); return; }
+    toast("Connected ✅"); await loadAccount();
+  }
+  $("#code-send").onclick = (ev) => busy(ev.target, async () => {
+    const r = await api("/api/account/code", { method: "POST", body: JSON.stringify({ code: $("#code").value }) });
+    $("#code").value = ""; await afterLogin(r);
+  }).catch(() => {});
+  $("#password-send").onclick = (ev) => busy(ev.target, async () => {
+    const pw = $("#password").value; $("#password").value = "";
+    const r = await api("/api/account/password", { method: "POST", body: JSON.stringify({ password: pw }) });
+    await afterLogin(r);
+  });
+  $("#login-cancel").onclick = async () => {
+    delete $("#step-phone").dataset.open;
+    try { acct = await api("/api/account/cancel", { method: "POST" }); } catch (_) {}
+    renderAccount();
+  };
+  $("#acct-verify").onclick = (ev) => busy(ev.target, async () => {
+    const r = await api("/api/account/verify", { method: "POST" });
+    toast(`Live ✅ Signed in as ${r.name || r.username}`);
+  }).then(loadAccount);
+  $("#acct-disconnect").onclick = async () => {
+    const go = () => busy($("#acct-disconnect"), async () => {
+      const r = await api("/api/account/disconnect", { method: "POST", body: JSON.stringify({ forget_api: false }) });
+      toast(r.logged_out_at_telegram ? "Disconnected and logged out ✅" : "Disconnected ✅");
+      await loadAccount();
+    });
+    if (tg && tg.showConfirm) tg.showConfirm("Disconnect your Telegram account from this app?", (ok) => ok && go());
+    else if (confirm("Disconnect your Telegram account from this app?")) go();
+  };
+
   // ------------------------------------------------ navigation
   let currentView = "jobs";
   document.querySelectorAll(".tab").forEach((t) => {
@@ -234,6 +341,7 @@
       if (currentView === "jobs") { state.mode = t.dataset.mode; renderCategoryChips(); loadJobs(); }
       if (currentView === "saved") loadSaved();
       if (currentView === "profile") renderProfile();
+      if (currentView === "account") loadAccount();
     };
   });
   document.querySelectorAll(".toggle").forEach((b) => {
@@ -253,6 +361,8 @@
       const [meta, profile] = await Promise.all([api("/api/meta"), api("/api/profile")]);
       state.categories = meta.categories;
       state.profile = profile;
+      state.isAdmin = !!meta.is_admin; state.userId = meta.user_id;
+      $("#tab-account").classList.remove("hidden");
       $("#stat").textContent = `${meta.stats.total} live Web3 jobs from company boards & job sites`;
       renderCategoryChips();
       loadJobs();
