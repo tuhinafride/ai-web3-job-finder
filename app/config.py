@@ -37,6 +37,17 @@ class Settings(BaseSettings):
     # If empty, WEBHOOK_SECRET is used. Changing it forces a new login.
     session_enc_key_raw: str = Field(default="", alias="SESSION_ENC_KEY")
 
+    # --- AI (any OpenAI-compatible API; optional, rules/templates are used without it) ---
+    llm_api_key: str = Field(default="", alias="LLM_API_KEY")
+    llm_base_url: str = Field(default="https://generativelanguage.googleapis.com/v1beta/openai", alias="LLM_BASE_URL")
+    llm_model: str = Field(default="gemini-2.5-flash", alias="LLM_MODEL")
+
+    # --- Discovery providers (all optional) ---
+    serper_api_key: str = Field(default="", alias="SERPER_API_KEY")       # Google results via serper.dev
+    brave_api_key: str = Field(default="", alias="BRAVE_API_KEY")         # Brave Search API
+    x_bearer_token: str = Field(default="", alias="X_BEARER_TOKEN")       # official X API v2
+    twitterapi_io_key: str = Field(default="", alias="TWITTERAPI_IO_KEY") # TwitterAPI.io (third party)
+
     # --- Data ---
     database_url: str = Field(default="sqlite+aiosqlite:///./data/jobs.db", alias="DATABASE_URL")
     fetch_interval_minutes: int = Field(default=60, alias="FETCH_INTERVAL_MINUTES")
