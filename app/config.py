@@ -25,6 +25,23 @@ class Settings(BaseSettings):
 
     # Comma-separated numeric Telegram user IDs allowed to use admin commands.
     admin_ids_raw: str = Field(default="", alias="ADMIN_IDS")
+    # Newer name for the same thing. Both are read and merged (union), so old deploys keep working.
+    admin_telegram_ids_raw: str = Field(default="", alias="ADMIN_TELEGRAM_IDS")
+    # Bot @username without "@". Optional: read from Telegram (getMe) at startup when empty.
+    bot_username_env: str = Field(default="", alias="BOT_USERNAME")
+    # Mini App short name from BotFather (/newapp). Enables t.me/<bot>/<short>?startapp=... links.
+    miniapp_short_name: str = Field(default="", alias="MINIAPP_SHORT_NAME")
+
+    # --- Multi-user limits (admins are unlimited) ---
+    user_daily_searches: int = Field(default=3, alias="USER_DAILY_SEARCHES")   # paid search runs/day
+    user_daily_drafts: int = Field(default=20, alias="USER_DAILY_DRAFTS")      # message drafts/day
+    # Max valid referrals one referrer can collect per hour (extra ones are recorded as invalid).
+    referral_hourly_cap: int = Field(default=20, alias="REFERRAL_HOURLY_CAP")
+    # Simple in-memory API rate limits (requests per minute).
+    rate_limit_user_per_min: int = Field(default=120, alias="RATE_LIMIT_USER_PER_MIN")
+    rate_limit_ip_per_min: int = Field(default=300, alias="RATE_LIMIT_IP_PER_MIN")
+    # Seconds between last_active_at writes for the same user.
+    activity_write_interval: int = Field(default=60, alias="ACTIVITY_WRITE_INTERVAL")
     # Channel the admin may publish to, e.g. @my_web3_jobs or -1001234567890
     channel_id: str = Field(default="", alias="CHANNEL_ID")
 
@@ -77,7 +94,8 @@ class Settings(BaseSettings):
     @property
     def admin_ids(self) -> set[int]:
         out: set[int] = set()
-        for part in self.admin_ids_raw.replace(" ", "").split(","):
+        raw = f"{self.admin_ids_raw},{self.admin_telegram_ids_raw}"
+        for part in raw.replace(" ", "").split(","):
             if part.lstrip("-").isdigit():
                 out.add(int(part))
         return out
