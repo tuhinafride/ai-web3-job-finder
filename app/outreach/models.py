@@ -182,3 +182,49 @@ class OutreachLog(Base):
     kind: Mapped[str] = mapped_column(String(16))      # search | qualify | draft | send | agent | error
     level: Mapped[str] = mapped_column(String(8), default="info")
     message: Mapped[str] = mapped_column(Text)
+
+
+class AutomationState(Base):
+    """Full-automation mode for one admin (persisted so it resumes after a restart).
+
+    state: running = enabled and not paused · paused = enabled and paused · stopped = not enabled.
+    """
+    __tablename__ = "automation_state"
+    owner_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    paused: Mapped[bool] = mapped_column(Boolean, default=False)
+    search_interval_minutes: Mapped[int] = mapped_column(Integer, default=15)
+    reminder_interval_minutes: Mapped[int] = mapped_column(Integer, default=1)
+    sources: Mapped[str] = mapped_column(String(64), default="google,x,telegram")
+    min_relevance: Mapped[int] = mapped_column(Integer, default=50)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_run_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_status: Mapped[str] = mapped_column(String(16), default="idle")   # idle|running|ok|partial|error|skipped
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    last_trigger: Mapped[str] = mapped_column(String(16), default="")      # schedule|app_open|manual|bot
+    runs_total: Mapped[int] = mapped_column(Integer, default=0)
+    runs_failed: Mapped[int] = mapped_column(Integer, default=0)
+    leads_found_total: Mapped[int] = mapped_column(Integer, default=0)
+    leads_notified_total: Mapped[int] = mapped_column(Integer, default=0)
+    last_new_leads: Mapped[int] = mapped_column(Integer, default=0)
+    last_notified: Mapped[int] = mapped_column(Integer, default=0)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
+    last_reminder_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    status_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    notify_error: Mapped[str] = mapped_column(String(300), default="")      # e.g. bot not started by the admin
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class LeadNotification(Base):
+    """Every lead the bot has announced to an owner. The unique key makes a repeat impossible."""
+    __tablename__ = "lead_notifications"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    lead_key: Mapped[str] = mapped_column(String(80))                   # Lead.uid (normalised URL hash)
+    text_fp: Mapped[str] = mapped_column(String(40), default="", index=True)  # near-duplicate text key
+    lead_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    digest: Mapped[bool] = mapped_column(Boolean, default=False)
+    sent_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    __table_args__ = (UniqueConstraint("owner_id", "lead_key"),)
