@@ -162,12 +162,19 @@ def client(fakes):
         yield c
 
 
-def test_agent_endpoints_owner_only(client):
+def test_agent_endpoints_open_to_users_but_scoped(client):
+    """Multi-user upgrade: every verified user may use the agent (own data only); auth still required."""
     assert client.get("/api/agent/dashboard").status_code == 401
     for path in ["/api/agent/dashboard", "/api/agent/leads", "/api/agent/drafts", "/api/agent/logs",
                  "/api/agent/profile", "/api/agent/settings", "/api/agent/contacts"]:
-        assert client.get(path, headers=h(STRANGER)).status_code == 403
-    assert client.post("/api/agent/search", json={}, headers=h(STRANGER)).status_code == 403
+        assert client.get(path, headers=h(STRANGER)).status_code == 200, path
+    assert client.get("/api/agent/leads", headers=h(STRANGER)).json()["total"] == 0
+    d = client.get("/api/agent/dashboard", headers=h(STRANGER)).json()
+    assert d["is_admin"] is False and d["telegram_connected"] is False and d["providers"] == {}
+    # the owner's personal profile is never handed to other users
+    assert "Tuhin" not in client.get("/api/agent/profile", headers=h(STRANGER)).json()["template"]
+    # personal-account sending/login stays owner-only
+    assert client.get("/api/account/status", headers=h(STRANGER)).status_code == 403
 
 
 @pytest.mark.asyncio
