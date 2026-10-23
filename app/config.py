@@ -55,15 +55,24 @@ class Settings(BaseSettings):
     session_enc_key_raw: str = Field(default="", alias="SESSION_ENC_KEY")
 
     # --- AI (any OpenAI-compatible API; optional, rules/templates are used without it) ---
+    # Default and free: Google Gemini (key from https://aistudio.google.com/apikey).
     llm_api_key: str = Field(default="", alias="LLM_API_KEY")
     llm_base_url: str = Field(default="https://generativelanguage.googleapis.com/v1beta/openai", alias="LLM_BASE_URL")
     llm_model: str = Field(default="gemini-2.5-flash", alias="LLM_MODEL")
-    # ChatGPT (OpenAI) writes outreach messages when set; also used for scoring if LLM_API_KEY is empty.
+    # Used once if the main model answers "model not found / not available" (e.g. a new key without 2.5 access).
+    llm_fallback_model: str = Field(default="gemini-flash-latest", alias="LLM_FALLBACK_MODEL")
+    # Free-tier guards: max AI scoring calls per search run, AI calls per UTC day, min seconds between calls.
+    llm_max_calls_per_run: int = Field(default=5, alias="LLM_MAX_CALLS_PER_RUN")
+    llm_daily_call_cap: int = Field(default=200, alias="LLM_DAILY_CALL_CAP")
+    llm_min_interval_sec: float = Field(default=4.0, alias="LLM_MIN_INTERVAL_SEC")
+    # Optional: ChatGPT (OpenAI). Only used when LLM_API_KEY is empty or as a fallback when the main AI fails.
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-5-mini", alias="OPENAI_MODEL")
-    # Grok (xAI) searches X with its built-in x_search tool.
-    xai_api_key: str = Field(default="", alias="XAI_API_KEY")
-    xai_model: str = Field(default="grok-4.7", alias="XAI_MODEL")
+    # Gemini "Grounding with Google Search" (free Google search without Serper/Brave).
+    # Uses GEMINI_API_KEY, or LLM_API_KEY when LLM_BASE_URL points at Google.
+    gemini_api_key_raw: str = Field(default="", alias="GEMINI_API_KEY")
+    gemini_search_model_raw: str = Field(default="", alias="GEMINI_SEARCH_MODEL")
+    gemini_grounding_daily_cap: int = Field(default=150, alias="GEMINI_GROUNDING_DAILY_CAP")
 
     # --- Discovery providers (all optional) ---
     serper_api_key: str = Field(default="", alias="SERPER_API_KEY")       # Google results via serper.dev
@@ -99,6 +108,20 @@ class Settings(BaseSettings):
             if part.lstrip("-").isdigit():
                 out.add(int(part))
         return out
+
+    @property
+    def gemini_api_key(self) -> str:
+        if self.gemini_api_key_raw:
+            return self.gemini_api_key_raw
+        return self.llm_api_key if "generativelanguage.googleapis.com" in self.llm_base_url else ""
+
+    @property
+    def gemini_search_model(self) -> str:
+        if self.gemini_search_model_raw:
+            return self.gemini_search_model_raw
+        if "generativelanguage.googleapis.com" in self.llm_base_url and self.llm_model.startswith("gemini"):
+            return self.llm_model
+        return "gemini-2.5-flash"
 
     @property
     def session_enc_key(self) -> str:
