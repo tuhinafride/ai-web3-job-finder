@@ -188,3 +188,10 @@ body:not(.is-admin) .admin-only { display: none !important; }
 .pager .btn { width: auto; padding: 8px 14px; margin-top: 10px; }
 .btn:disabled { opacity: .5; }
 .tab span { white-space: nowrap; }
+/* full automation card */
+#auto-card .btns { display: flex; flex-wrap: wrap; gap: 8px; }
+#auto-card .btns .btn { flex: 1 1 40%; margin-top: 8px; }
+#auto-card details { margin-top: 10px; }
+#auto-card summary { cursor: pointer; padding: 6px 0; }
+#auto-card .log { margin-top: 8px; word-break: break-word; }
+#au-logs { max-height: 320px; overflow-y: auto; }
