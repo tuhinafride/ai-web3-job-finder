@@ -110,7 +110,7 @@ async def test_ai_fallback_to_template_when_llm_lies(monkeypatch):
 
     async def fake(system, user, **kw):
         return {"message": "Hi NovaChain, I worked 12 years at Coinbase."}
-    monkeypatch.setattr(llm, "enabled", lambda: True)
+    monkeypatch.setattr(llm, "enabled", lambda *a: True)
     monkeypatch.setattr(llm, "chat_json", fake)
     text, by = await D.generate(_profile(), _lead())
     assert by == "template" and "Coinbase" not in text
