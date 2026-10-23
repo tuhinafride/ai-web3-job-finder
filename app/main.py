@@ -29,7 +29,9 @@ from . import userclient as uc
 from .outreach import models as _outreach_models  # noqa: F401  (registers tables)
 from .outreach import agent as outreach_agent
 from .outreach.api import router as agent_router
-from .webapp_auth import telegram_user
+from . import accounts as acc
+from .admin_api import router as admin_router
+from .auth import current_user, ip_bucket
 
 
 class RedactTokenFilter(logging.Filter):
@@ -133,6 +135,7 @@ async def setup_bot(bot: Bot):
         return
     try:
         BOT_INFO["username"] = (await bot.get_me()).username or ""
+        acc.set_bot_username(BOT_INFO["username"])
     except Exception:
         pass
     await bot.set_my_commands(COMMANDS)
@@ -156,6 +159,35 @@ async def setup_bot(bot: Bot):
 
 app = FastAPI(title="Web3 Job Finder", lifespan=lifespan, docs_url=None, redoc_url=None)
 app.include_router(agent_router)
+app.include_router(admin_router)
+
+
+def _client_ip(request: Request) -> str:
+    # Behind Render's proxy request.client is the proxy, so use the client IP from X-Forwarded-For.
+    # (Spoofable, but it only keys the coarse IP bucket; per-user limits need valid initData.)
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()[:64]
+    return request.client.host if request.client else "unknown"
+
+
+@app.middleware("http")
+async def rate_limit_and_headers(request: Request, call_next):
+    if request.url.path.startswith("/api/") and not ip_bucket.allow(f"ip:{_client_ip(request)}"):
+        return JSONResponse({"detail": "Too many requests. Slow down a little."}, status_code=429)
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    if request.url.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
+@app.exception_handler(acc.LimitReached)
+async def limit_reached(_: Request, exc: acc.LimitReached):
+    what = "searches" if exc.kind == "search" else "message drafts"
+    return JSONResponse({"detail": f"Daily limit reached: {exc.limit} {what} per day. It resets at 00:00 UTC.",
+                         "code": "daily_limit", "kind": exc.kind}, status_code=429)
 
 
 # ------------------------------------------------------------------ webhook
@@ -181,7 +213,7 @@ async def health():
 @app.get("/api/botinfo")
 async def botinfo():
     """Public: lets the Mini App tell the user which bot it belongs to."""
-    return {"username": BOT_INFO["username"]}
+    return {"username": acc.bot_username()}
 
 
 @app.get("/")
@@ -191,15 +223,46 @@ async def root():
 
 # ------------------------------------------------------------------ Mini App API
 @app.get("/api/meta")
-async def api_meta(user: dict = Depends(telegram_user)):
+async def api_meta(user: dict = Depends(current_user)):
     async with SessionLocal() as s:
         st = await svc.stats(s)
     return {"categories": CATEGORY_LABELS, "stats": st,
-            "is_admin": user["id"] in settings.admin_ids, "user_id": user["id"]}
+            "is_admin": user["is_admin"], "user_id": user["id"]}
+
+
+# ------------------------------------------------------------------ me / referrals
+@app.get("/api/me")
+async def api_me(user: dict = Depends(current_user)):
+    from .db import User
+    async with SessionLocal() as s:
+        u = await s.get(User, user["id"])
+        code = await acc.ensure_code(s, u)
+        stats = await acc.referral_stats(s, u.tg_id)
+        cfg = await acc.referral_config(s)
+        limits = await acc.limits_for(s, u.tg_id)
+        await s.commit()
+    return {
+        # True only because this request carried initData that passed the server-side HMAC check.
+        "connected": True, "id": u.tg_id, "username": u.username, "first_name": u.first_name,
+        "is_admin": user["is_admin"], "status": u.status or "active",
+        "registered_at": acc.iso(u.registered_at or u.created_at), "referred": bool(u.referred_by),
+        "referral": {"code": code, **acc.referral_links(code), **stats,
+                     "points_enabled": cfg["enabled"], "points_per_referral": cfg["points_per_referral"],
+                     "points_label": cfg["label"]},
+        "limits": limits,
+    }
+
+
+@app.get("/api/referrals/leaderboard")
+async def api_leaderboard(user: dict = Depends(current_user), limit: int = Query(10, ge=1, le=50)):
+    async with SessionLocal() as s:
+        rows = await acc.leaderboard(s, limit, include_ids=user["is_admin"])
+        cfg = await acc.referral_config(s)
+    return {"leaderboard": rows, "points_label": cfg["label"]}
 
 
 @app.get("/api/jobs")
-async def api_jobs(user: dict = Depends(telegram_user), q: str = Query("", max_length=100),
+async def api_jobs(user: dict = Depends(current_user), q: str = Query("", max_length=100),
                    category: str = Query("", max_length=32), remote: bool = False,
                    has_salary: bool = False, verified_only: bool = False, for_me: bool = False,
                    offset: int = Query(0, ge=0, le=5000), limit: int = Query(20, ge=1, le=50)):
@@ -227,7 +290,7 @@ async def api_jobs(user: dict = Depends(telegram_user), q: str = Query("", max_l
 
 
 @app.get("/api/jobs/{job_id}")
-async def api_job(job_id: int, user: dict = Depends(telegram_user)):
+async def api_job(job_id: int, user: dict = Depends(current_user)):
     async with SessionLocal() as s:
         job = await s.get(Job, job_id)
         if not job:
@@ -240,13 +303,13 @@ async def api_job(job_id: int, user: dict = Depends(telegram_user)):
 
 
 @app.get("/api/saved")
-async def api_saved(user: dict = Depends(telegram_user)):
+async def api_saved(user: dict = Depends(current_user)):
     async with SessionLocal() as s:
         return {"jobs": [svc.job_dict(j, True) for j in await svc.list_saved(s, user["id"])]}
 
 
 @app.post("/api/saved/{job_id}")
-async def api_save(job_id: int, user: dict = Depends(telegram_user)):
+async def api_save(job_id: int, user: dict = Depends(current_user)):
     async with SessionLocal() as s:
         try:
             await svc.toggle_save(s, user["id"], job_id, want=True)
@@ -257,7 +320,7 @@ async def api_save(job_id: int, user: dict = Depends(telegram_user)):
 
 
 @app.delete("/api/saved/{job_id}")
-async def api_unsave(job_id: int, user: dict = Depends(telegram_user)):
+async def api_unsave(job_id: int, user: dict = Depends(current_user)):
     async with SessionLocal() as s:
         await svc.toggle_save(s, user["id"], job_id, want=False)
         await s.commit()
@@ -272,7 +335,7 @@ class ProfileIn(BaseModel):
 
 
 @app.get("/api/profile")
-async def api_profile(user: dict = Depends(telegram_user)):
+async def api_profile(user: dict = Depends(current_user)):
     async with SessionLocal() as s:
         u = await svc.get_or_create_user(s, user["id"], user.get("username"), user.get("first_name"))
         await s.commit()
@@ -280,7 +343,7 @@ async def api_profile(user: dict = Depends(telegram_user)):
 
 
 @app.put("/api/profile")
-async def api_profile_put(body: ProfileIn, user: dict = Depends(telegram_user)):
+async def api_profile_put(body: ProfileIn, user: dict = Depends(current_user)):
     roles = [r for r in body.roles if r in CATEGORY_LABELS]
     skills = [s.strip().lower().replace(",", " ")[:40] for s in body.skills if s.strip()]
     async with SessionLocal() as s:
@@ -292,8 +355,8 @@ async def api_profile_put(body: ProfileIn, user: dict = Depends(telegram_user)):
 
 
 # ------------------------------------------------------------------ personal account (owner only)
-async def owner_user(user: dict = Depends(telegram_user)) -> dict:
-    if user["id"] not in settings.admin_ids:
+async def owner_user(user: dict = Depends(current_user)) -> dict:
+    if not user["is_admin"]:
         raise HTTPException(status_code=403, detail=f"owner_only:{user['id']}")
     return user
 
