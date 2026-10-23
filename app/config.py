@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     llm_api_key: str = Field(default="", alias="LLM_API_KEY")
     llm_base_url: str = Field(default="https://generativelanguage.googleapis.com/v1beta/openai", alias="LLM_BASE_URL")
     llm_model: str = Field(default="gemini-2.5-flash", alias="LLM_MODEL")
+    # ChatGPT (OpenAI) writes outreach messages when set; also used for scoring if LLM_API_KEY is empty.
+    openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
+    openai_model: str = Field(default="gpt-5-mini", alias="OPENAI_MODEL")
+    # Grok (xAI) searches X with its built-in x_search tool.
+    xai_api_key: str = Field(default="", alias="XAI_API_KEY")
+    xai_model: str = Field(default="grok-4.7", alias="XAI_MODEL")
 
     # --- Discovery providers (all optional) ---
     serper_api_key: str = Field(default="", alias="SERPER_API_KEY")       # Google results via serper.dev
