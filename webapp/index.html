@@ -71,6 +71,35 @@
         <input id="find-q" type="text" placeholder="Optional: custom search, e.g. Solana moderator hiring" />
         <div class="btns"><button id="find-go" class="btn">🔍 Find Jobs</button><button id="stop-go" class="btn danger">⏹ Stop Agent</button></div>
       </div>
+      <div class="card admin-only" id="auto-card">
+        <div class="status-row"><span id="au-dot" class="dot"></span><b id="au-title">Full automation</b></div>
+        <p id="au-sub" class="muted small">Searches Google, X and Telegram on a schedule and sends new matching leads to you through the bot. Messages to recruiters are never sent automatically.</p>
+        <div class="stats three" id="au-stats"></div>
+        <div id="au-err" class="log error hidden"></div>
+        <div class="btns">
+          <button id="au-start" class="btn">▶️ Start</button>
+          <button id="au-pause" class="btn secondary">⏸ Pause</button>
+          <button id="au-stop" class="btn danger">⏹ Stop</button>
+          <button id="au-run" class="btn ghost">🔄 Run now</button>
+        </div>
+        <details id="au-settings-box">
+          <summary class="muted small">Automation settings</summary>
+          <label class="label" for="au-interval">Search every N minutes (min 5)</label><input id="au-interval" type="text" inputmode="numeric" />
+          <label class="label" for="au-reminder">Status reminder every N minutes (min 1)</label><input id="au-reminder" type="text" inputmode="numeric" />
+          <label class="label" for="au-minrel">Only notify leads with match % at least (0–100)</label><input id="au-minrel" type="text" inputmode="numeric" />
+          <label class="label">Sources</label>
+          <div class="chips wrap" id="au-sources">
+            <button class="chip" data-s="google">🔎 Google</button>
+            <button class="chip" data-s="x">𝕏 X</button>
+            <button class="chip" data-s="telegram">✈️ Telegram</button>
+          </div>
+          <button id="au-save" class="btn secondary">Save automation settings</button>
+        </details>
+        <details id="au-logs-box">
+          <summary class="muted small">Automation logs</summary>
+          <div id="au-logs" class="list"></div>
+        </details>
+      </div>
       <div class="stats" id="stats"></div>
       <div id="prov-warn" class="card warn hidden"></div>
       <h3 class="section-title small-title">Recent activity</h3>
@@ -157,9 +186,10 @@
           <label class="label">Minimum gap between messages, seconds (60–3600)</label><input id="a-gap" type="text" inputmode="numeric" />
           <label class="label">Auto search every N hours (0 = only when you tap Find Jobs)</label><input id="a-auto" type="text" inputmode="numeric" />
           </div>
-          <label class="label">Search phrases (one per line)</label><textarea id="a-queries" rows="6"></textarea>
-          <div class="admin-only"><label class="label">Public Telegram job channels to read (one per line, e.g. @channelname)</label><textarea id="a-channels" rows="4"></textarea></div>
+          <label class="label">Search phrases (one per line · leave empty to restore the defaults)</label><textarea id="a-queries" rows="6"></textarea>
+          <div class="admin-only"><label class="label">Public Telegram job channels to read (one per line: @channelname or t.me/channelname, max 15)</label><textarea id="a-channels" rows="4"></textarea></div>
           <button id="a-save" class="btn">Save agent settings</button>
+          <div id="a-warn" class="muted small hidden"></div>
           <div id="a-prov" class="muted small"></div>
         </div>
       </div>
@@ -325,5 +355,6 @@
   <script src="agent.js"></script>
   <script src="profile.js"></script>
   <script src="admin.js"></script>
+  <script src="automation.js"></script>
 </body>
 </html>
