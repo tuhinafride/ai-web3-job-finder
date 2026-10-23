@@ -6,6 +6,8 @@ admin-only. Paid provider calls (search runs, drafts) are limited per user per d
 """
 from __future__ import annotations
 
+import asyncio
+import re
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -17,7 +19,9 @@ from ..db import Job, SessionLocal, utcnow
 from .. import accounts as acc
 from ..auth import current_user
 from . import agent as A
+from . import automation as AU
 from . import search as S
+from .models import DEFAULT_QUERIES
 from .models import (ROLE_LABELS, AgentState, ContactedRecipient, Contact, Draft, Lead, OutreachLog,
                      OwnerProfile)
 
@@ -95,6 +99,7 @@ async def dashboard(owner_id: int = Depends(owner)):
                               "min_interval_sec": st.min_interval_sec, "running": A.discovery_running(owner_id),
                               "last_search_at": iso(st.last_search_at)},
             "providers": S.configured() if is_admin else {}, "telegram_connected": acct["connected"],
+            "automation": (await AU.status(owner_id)) if is_admin else None,
             "recent_logs": [{"ts": iso(l.ts), "kind": l.kind, "level": l.level, "message": l.message} for l in logs]}
 
 
@@ -293,7 +298,7 @@ async def draft_action(draft_id: int, body: DraftAction, owner_id: int = Depends
 
 # ------------------------------------------------------------------ contacts / logs
 @router.get("/contacts")
-async def contacts(owner_id: int = Depends(owner), platform: str = "", limit: int = Query(50, le=100)):
+async def contacts(owner_id: int = Depends(owner), platform: str = "", limit: int = Query(50, ge=1, le=100)):
     async with SessionLocal() as s:
         w = [Lead.owner_id == owner_id, Lead.status != "skipped"]
         if platform:
@@ -309,23 +314,32 @@ async def contacts(owner_id: int = Depends(owner), platform: str = "", limit: in
 
 
 @router.get("/logs")
-async def logs(owner_id: int = Depends(owner), limit: int = Query(80, le=200)):
+async def logs(owner_id: int = Depends(owner), limit: int = Query(80, ge=1, le=200), kind: str = Query("", max_length=16)):
     async with SessionLocal() as s:
-        rows = (await s.scalars(select(OutreachLog).where(OutreachLog.owner_id == owner_id)
+        w = [OutreachLog.owner_id == owner_id]
+        if kind:
+            w.append(OutreachLog.kind == kind)
+        rows = (await s.scalars(select(OutreachLog).where(*w)
                                 .order_by(OutreachLog.id.desc()).limit(limit))).all()
     return {"logs": [{"ts": iso(l.ts), "kind": l.kind, "level": l.level, "message": l.message} for l in rows]}
 
 
 # ------------------------------------------------------------------ profile & settings
 class ProfileIn(BaseModel):
-    name: str = Field(max_length=120)
+    name: str = Field("", max_length=120)
     location: str = Field("", max_length=120)
     headline: str = Field("", max_length=200)
     experience: str = Field("", max_length=1500)
     skills: str = Field("", max_length=1000)
-    preferred_roles: list[str] = Field(default_factory=list, max_length=9)
+    preferred_roles: list[str] = Field(default_factory=list, max_length=12)
     links: str = Field("", max_length=500)
     template: str = Field("", max_length=1500)
+
+
+def _profile_out(p) -> dict:
+    return {"name": p.name, "location": p.location, "headline": p.headline, "experience": p.experience,
+            "skills": p.skills, "preferred_roles": A.csv(p.preferred_roles), "links": p.links,
+            "template": p.template, "roles": ROLE_LABELS}
 
 
 @router.get("/profile")
@@ -333,28 +347,58 @@ async def get_profile(owner_id: int = Depends(owner)):
     async with SessionLocal() as s:
         p = await A.get_profile(s, owner_id)
         await s.commit()
-        return {"name": p.name, "location": p.location, "headline": p.headline, "experience": p.experience,
-                "skills": p.skills, "preferred_roles": A.csv(p.preferred_roles), "links": p.links,
-                "template": p.template, "roles": ROLE_LABELS}
+        return _profile_out(p)
 
 
 @router.put("/profile")
 async def put_profile(body: ProfileIn, owner_id: int = Depends(owner)):
+    if not body.template.strip():
+        # an empty template produced empty drafts that Telegram then refused to send
+        raise HTTPException(400, "The message template can't be empty.")
     async with SessionLocal() as s:
         p = await A.get_profile(s, owner_id)
         for k in ("name", "location", "headline", "experience", "skills", "links", "template"):
             setattr(p, k, getattr(body, k).strip())
-        p.preferred_roles = ",".join(r for r in body.preferred_roles if r in ROLE_LABELS)
+        p.preferred_roles = ",".join(dict.fromkeys(r for r in body.preferred_roles if r in ROLE_LABELS))
         await s.commit()
-    return {"ok": True}
+        return {"ok": True, "profile": _profile_out(p)}
 
 
 class SettingsIn(BaseModel):
-    daily_limit: int = Field(10, ge=1, le=30)
-    min_interval_sec: int = Field(180, ge=60, le=3600)
-    auto_search_hours: int = Field(0, ge=0, le=48)
-    queries: str = Field("", max_length=2000)
-    tg_channels: str = Field("", max_length=1000)
+    """Every field is optional: only the fields sent are changed (a partial save used to reset the rest)."""
+    daily_limit: int | None = Field(None, ge=1, le=30)
+    min_interval_sec: int | None = Field(None, ge=60, le=3600)
+    auto_search_hours: int | None = Field(None, ge=0, le=48)
+    queries: str | None = Field(None, max_length=2000)
+    tg_channels: str | None = Field(None, max_length=1000)
+
+
+CHANNEL_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]{4,31}")
+
+
+def normalise_channels(raw: str) -> tuple[list[str], list[str]]:
+    """Accepts @name, name, t.me/name, https://t.me/name/123, https://t.me/s/name. Returns (valid, invalid)."""
+    valid, invalid = [], []
+    for part in re.split(r"[,\s]+", raw or ""):
+        x = part.strip()
+        if not x:
+            continue
+        name = re.sub(r"^(?:https?://)?(?:www\.)?(?:t|telegram)\.me/(?:s/)?", "", x, flags=re.I)
+        name = name.lstrip("@").split("/")[0].split("?")[0]
+        if CHANNEL_RE.fullmatch(name) and not name.lower().endswith("bot"):
+            if name.lower() not in {v.lower() for v in valid}:
+                valid.append(name)
+        else:
+            invalid.append(x[:64])
+    return valid, invalid
+
+
+def _settings_out(st, owner_id: int) -> dict:
+    return {"stopped": st.stopped, "daily_limit": st.daily_limit, "min_interval_sec": st.min_interval_sec,
+            "auto_search_hours": st.auto_search_hours, "queries": st.queries, "tg_channels": st.tg_channels,
+            "default_queries": "\n".join(DEFAULT_QUERIES),
+            "providers": S.configured() if acc.is_admin_id(owner_id) else {},
+            "is_admin": acc.is_admin_id(owner_id)}
 
 
 @router.get("/settings")
@@ -362,25 +406,41 @@ async def get_settings_(owner_id: int = Depends(owner)):
     async with SessionLocal() as s:
         st = await A.get_state(s, owner_id)
         await s.commit()
-        return {"stopped": st.stopped, "daily_limit": st.daily_limit, "min_interval_sec": st.min_interval_sec,
-                "auto_search_hours": st.auto_search_hours, "queries": st.queries, "tg_channels": st.tg_channels,
-                "providers": S.configured() if acc.is_admin_id(owner_id) else {},
-                "is_admin": acc.is_admin_id(owner_id)}
+        return _settings_out(st, owner_id)
 
 
 @router.put("/settings")
 async def put_settings(body: SettingsIn, owner_id: int = Depends(owner)):
+    admin = acc.is_admin_id(owner_id)
+    warnings: list[str] = []
     async with SessionLocal() as s:
         st = await A.get_state(s, owner_id)
-        st.daily_limit, st.min_interval_sec = body.daily_limit, body.min_interval_sec
-        # auto-search spends paid provider calls in the background: admin-only
-        st.auto_search_hours = body.auto_search_hours if acc.is_admin_id(owner_id) else 0
-        st.queries = "\n".join([q.strip() for q in body.queries.split("\n") if q.strip()][:12])
-        st.tg_channels = "\n".join([c.strip().lstrip("@") for c in body.tg_channels.replace(",", "\n").split("\n")
-                                    if c.strip()][:15])
+        if body.daily_limit is not None:
+            st.daily_limit = body.daily_limit
+        if body.min_interval_sec is not None:
+            st.min_interval_sec = body.min_interval_sec
+        if body.auto_search_hours is not None:
+            # auto-search spends paid provider calls in the background: admin-only
+            st.auto_search_hours = body.auto_search_hours if admin else 0
+        if body.queries is not None:
+            qs = list(dict.fromkeys(q.strip()[:200] for q in body.queries.split("\n") if q.strip()))[:12]
+            if not qs:
+                qs = list(DEFAULT_QUERIES)
+                warnings.append("Search phrases were empty, so the defaults were restored.")
+            st.queries = "\n".join(qs)
+        if body.tg_channels is not None:
+            if admin:
+                valid, invalid = normalise_channels(body.tg_channels)
+                if len(valid) > 15:
+                    warnings.append(f"Only the first 15 channels are kept ({len(valid)} given).")
+                st.tg_channels = "\n".join(valid[:15])
+                if invalid:
+                    warnings.append("Not valid public channel usernames (ignored): " + ", ".join(invalid[:10]))
+            else:
+                warnings.append("Telegram channel reading is admin-only; channels were not changed.")
         await A.add_log(owner_id, "agent", "Agent settings updated", s=s)
         await s.commit()
-    return {"ok": True}
+        return {"ok": True, "warnings": warnings, "settings": _settings_out(st, owner_id)}
 
 
 class StopIn(BaseModel):
@@ -391,3 +451,68 @@ class StopIn(BaseModel):
 async def stop(body: StopIn, owner_id: int = Depends(owner)):
     await A.stop_agent(owner_id, body.stop)
     return {"stopped": body.stop}
+
+
+# ------------------------------------------------------------------ full automation (admin only)
+async def admin_owner(user: dict = Depends(current_user)) -> int:
+    if not user["is_admin"]:
+        raise HTTPException(403, "Automation is admin-only.")
+    return user["id"]
+
+
+@router.get("/automation")
+async def automation_status(owner_id: int = Depends(admin_owner)):
+    from . import llm
+    out = await AU.status(owner_id)
+    out["llm"] = llm.status()
+    out["grounding_left_today"] = S.grounding_left()
+    out["providers"] = S.configured()
+    return out
+
+
+class AutomationSettingsIn(BaseModel):
+    search_interval_minutes: int | None = Field(None, ge=AU.MIN_SEARCH_INTERVAL, le=AU.MAX_SEARCH_INTERVAL)
+    reminder_interval_minutes: int | None = Field(None, ge=AU.MIN_REMINDER_INTERVAL, le=AU.MAX_REMINDER_INTERVAL)
+    sources: list[str] | None = Field(None, max_length=3)
+    min_relevance: int | None = Field(None, ge=0, le=100)
+
+
+@router.put("/automation/settings")
+async def automation_settings(body: AutomationSettingsIn, owner_id: int = Depends(admin_owner)):
+    try:
+        return await AU.update_settings(owner_id, **body.model_dump())
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+def _refresh_status_message(owner_id: int):
+    async def go():
+        try:
+            await AU.send_reminder(owner_id)
+        except Exception:
+            pass
+    asyncio.create_task(go())
+
+
+@router.post("/automation/app-open")
+async def automation_app_open(owner_id: int = Depends(admin_owner)):
+    """Called when the owner opens the Mini App: runs a search now if automation is on (debounced 5 min)."""
+    started, message = await AU.trigger_run(owner_id, "app_open")
+    return {"started": started, "message": message, **(await AU.status(owner_id))}
+
+
+@router.post("/automation/{action}")
+async def automation_action(action: str, owner_id: int = Depends(admin_owner)):
+    if action == "run":
+        started, message = await AU.trigger_run(owner_id, "manual")
+        return {"started": started, "message": message, **(await AU.status(owner_id))}
+    if action not in ("start", "pause", "stop"):
+        raise HTTPException(400, "Unknown action (start, pause, stop, run).")
+    out = await AU.set_mode(owner_id, action, by="app")
+    _refresh_status_message(owner_id)
+    return out
+
+
+@router.get("/automation/logs")
+async def automation_logs(owner_id: int = Depends(admin_owner), limit: int = Query(80, ge=1, le=200)):
+    return {"logs": await AU.logs(owner_id, limit), "provider_backoff": S.backoff.snapshot()}
