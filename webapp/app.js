@@ -29,7 +29,8 @@
     if (res.status === 401) { showGate("mismatch"); throw new Error("auth"); }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      const err = new Error(body.detail || res.statusText);
+      const detail = Array.isArray(body.detail) ? (body.detail[0] && body.detail[0].msg) : body.detail;
+      const err = new Error(detail || res.statusText);
       err.code = body.code || ""; err.status = res.status;
       throw err;
     }
@@ -184,6 +185,7 @@
       save.onclick = async () => { await toggleSave(j); save.textContent = j.saved ? "★ Saved" : "☆ Save"; };
       btns.append(apply, save);
       box.append(btns);
+      if (window.W3 && W3.isOwner && W3.trackButton) box.append(W3.trackButton(j));
       const src = el("button", "btn ghost", "View original listing ↗");
       src.onclick = () => openLink(j.url);
       box.append(src);
@@ -202,8 +204,8 @@
   $("#sheet").onclick = (e) => { if (e.target.id === "sheet") closeDetail(); };
 
   // ------------------------------------------------ saved
-  async function loadSaved() {
-    const list = $("#saved-list");
+  async function loadSaved(target) {
+    const list = target || $("#saved-list");
     list.replaceChildren(el("div", "skeleton"));
     try {
       const data = await api("/api/saved");
@@ -356,6 +358,7 @@
       if (currentView === "saved") loadSaved();
       if (currentView === "profile") renderProfile();
       if (currentView === "account") loadAccount();
+      if (window.W3 && W3.onView) W3.onView(currentView, t.dataset);
     };
   });
   document.querySelectorAll(".toggle").forEach((b) => {
@@ -368,6 +371,10 @@
   });
   $("#more").onclick = () => loadJobs(false);
 
+  // shared helpers for the owner agent module (agent.js)
+  window.W3 = Object.assign(window.W3 || {}, { api, el, $, toast, openLink, ago, state, loadSaved, loadAccount,
+    openSheet: () => { $("#sheet").classList.remove("hidden"); return $("#detail"); }, closeDetail });
+
   // ------------------------------------------------ boot
   (async () => {
     if (!initData) { showGate("nolink"); return; }
@@ -376,7 +383,8 @@
       state.categories = meta.categories;
       state.profile = profile;
       state.isAdmin = !!meta.is_admin; state.userId = meta.user_id;
-      $("#tab-account").classList.remove("hidden");
+      if (state.isAdmin) $("#tab-account").classList.remove("hidden");
+      if (state.isAdmin && window.W3 && W3.initOwner) W3.initOwner();
       $("#stat").textContent = `${meta.stats.total} live Web3 jobs from company boards & job sites`;
       renderCategoryChips();
       loadJobs();
