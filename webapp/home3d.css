@@ -107,3 +107,11 @@ body.h3d-on #view-home .small-title { text-shadow: 0 1px 6px #050b1f; }
   .h3d-live::after, .h3d-presence::before, .h3d-sweep, .h3d-blip, .h3d-bar::after { animation: none !important; }
   .h3d-blip { opacity: .7; }
 }
+
+/* network overlay above content: thin, faint, text stays readable */
+.h3d-ov { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 3; pointer-events: none; display: none;
+  opacity: .16; mix-blend-mode: screen; }
+body.h3d-on .h3d-ov { display: block; }
+body.h3d-on main h1, body.h3d-on main h2, body.h3d-on main h3, body.h3d-on main p, body.h3d-on main span, body.h3d-on main label, body.h3d-on main button {
+  text-shadow: 0 1px 3px rgba(2,8,23,.9); }
+@media (prefers-reduced-motion: reduce) { .h3d-ov { opacity: .1; } }
