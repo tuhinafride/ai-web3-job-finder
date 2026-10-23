@@ -52,7 +52,7 @@ def kb(*rows: list[InlineKeyboardButton]) -> InlineKeyboardMarkup:
 
 def app_button_row() -> list[InlineKeyboardButton]:
     url = get_settings().webapp_url
-    return [btn("📱 Open Job Finder App", web=url)] if url.startswith("https://") else []
+    return [btn("📱 Open Mini App", web=url)] if url.startswith("https://") else []
 
 
 # ------------------------------------------------------------------ basics
@@ -72,16 +72,37 @@ HELP = (
 
 
 @router.message(CommandStart())
-async def cmd_start(m: Message, state: FSMContext):
+async def cmd_start(m: Message, state: FSMContext, command: CommandObject | None = None):
     await state.clear()
+    from .. import accounts as acc
+    if m.from_user is None or m.from_user.is_bot:
+        return
+    payload = (command.args or "") if command else ""
+    tg = {"id": m.from_user.id, "username": m.from_user.username, "first_name": m.from_user.first_name,
+          "is_bot": bool(m.from_user.is_bot)}
     async with SessionLocal() as s:
-        await svc.get_or_create_user(s, m.from_user.id, m.from_user.username, m.from_user.first_name)
+        u, is_new, outcome = await acc.upsert_user(s, tg, "bot", payload)
+        code = await acc.ensure_code(s, u)
         await s.commit()
+    if u.status == acc.SUSPENDED:
+        await m.answer("Your access to this bot is suspended. Contact the bot admin if you think this is a mistake.")
+        return
+    if not acc.bot_username():
+        try:
+            acc.set_bot_username((await m.bot.me()).username)
+        except Exception:
+            pass
+    links = acc.referral_links(code)
     name = escape(m.from_user.first_name or "there")
+    welcome = "🎉 You joined with a friend's invite. Welcome!\n\n" if outcome == "valid" else ""
+    invite = ""
+    if links["bot_link"]:
+        invite = ("\n\n🤝 <b>Invite friends</b>: share your personal link and earn reward points "
+                  "(points only, no cash value):\n" + escape(links["app_link"] or links["bot_link"]))
     await m.answer(
-        f"👋 Hi {name}! I find <b>real Web3 jobs</b>: community, moderation, social media, support, "
-        "BD, growth, developer and more.\n\nStart with /profile so I can match jobs to you, "
-        "then turn on /alerts.\n\n" + HELP,
+        f"👋 Hi {name}! {welcome}I find <b>real Web3 jobs</b>: community, moderation, social media, support, "
+        "BD, growth, developer and more.\n\nTap <b>Open Mini App</b> for the full app: job board, AI job agent, "
+        "tracker and your profile. Or use /profile and /alerts right here." + invite + "\n\n" + HELP,
         reply_markup=kb(app_button_row(),
                         [btn("🎯 Jobs for me", "l|f||0"), btn("🆕 Latest", "l|a||0")],
                         [btn("👤 Set up profile", "p|show")]),
