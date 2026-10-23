@@ -1,4 +1,9 @@
-"""Owner-only REST API for the agent (mounted under /api/agent)."""
+"""REST API for the AI job agent (mounted under /api/agent).
+
+Every active user can use it; all data is scoped by the verified Telegram user id (owner_id).
+Sending from the personal Telegram account, Telegram-channel discovery and auto-search stay
+admin-only. Paid provider calls (search runs, drafts) are limited per user per day.
+"""
 from __future__ import annotations
 
 from datetime import timedelta
@@ -9,7 +14,8 @@ from sqlalchemy import func, or_, select
 
 from ..config import get_settings
 from ..db import Job, SessionLocal, utcnow
-from ..webapp_auth import telegram_user
+from .. import accounts as acc
+from ..auth import current_user
 from . import agent as A
 from . import search as S
 from .models import (ROLE_LABELS, AgentState, ContactedRecipient, Contact, Draft, Lead, OutreachLog,
@@ -18,10 +24,12 @@ from .models import (ROLE_LABELS, AgentState, ContactedRecipient, Contact, Draft
 router = APIRouter(prefix="/api/agent")
 
 
-async def owner(user: dict = Depends(telegram_user)) -> int:
-    if user["id"] not in get_settings().admin_ids:
-        raise HTTPException(403, f"owner_only:{user['id']}")
+async def owner(user: dict = Depends(current_user)) -> int:
+    """The verified id of the calling user. Every query below filters by it."""
     return user["id"]
+
+
+ADMIN_ONLY_SOURCES = {"telegram"}   # reads channels through the owner's personal account
 
 
 def iso(dt):
@@ -75,12 +83,18 @@ async def dashboard(owner_id: int = Depends(owner)):
         }
         logs = (await s.scalars(select(OutreachLog).where(OutreachLog.owner_id == owner_id)
                                 .order_by(OutreachLog.id.desc()).limit(5))).all()
-    from .. import userclient as uc
-    acct = await uc.status(owner_id)
-    return {**data, "agent": {"stopped": st.stopped, "daily_limit": st.daily_limit,
+    is_admin = acc.is_admin_id(owner_id)
+    if is_admin:
+        from .. import userclient as uc
+        acct = await uc.status(owner_id)
+    else:
+        acct = {"connected": False}
+    async with SessionLocal() as s:
+        limits = await acc.limits_for(s, owner_id)
+    return {**data, "is_admin": is_admin, "limits": limits, "agent": {"stopped": st.stopped, "daily_limit": st.daily_limit,
                               "min_interval_sec": st.min_interval_sec, "running": A.discovery_running(owner_id),
                               "last_search_at": iso(st.last_search_at)},
-            "providers": S.configured(), "telegram_connected": acct["connected"],
+            "providers": S.configured() if is_admin else {}, "telegram_connected": acct["connected"],
             "recent_logs": [{"ts": iso(l.ts), "kind": l.kind, "level": l.level, "message": l.message} for l in logs]}
 
 
@@ -93,11 +107,19 @@ class SearchIn(BaseModel):
 @router.post("/search")
 async def search(body: SearchIn, owner_id: int = Depends(owner)):
     sources = [x for x in body.sources if x in ("google", "x", "telegram")]
+    if not acc.is_admin_id(owner_id):
+        if sources and all(x in ADMIN_ONLY_SOURCES for x in sources):
+            raise HTTPException(403, "Telegram channel search uses the owner's account and is admin-only.")
+        sources = [x for x in sources if x not in ADMIN_ONLY_SOURCES]
     if not sources:
         raise HTTPException(400, "Pick at least one source.")
     async with SessionLocal() as s:
         if (await A.get_state(s, owner_id)).stopped:
             raise HTTPException(409, "Agent is stopped. Resume it first.")
+        if A.discovery_running(owner_id):
+            return {"started": False, "running": True, "message": "A search is already running."}
+        await acc.consume(s, owner_id, "search")      # raises LimitReached -> 429
+        await s.commit()
     started = A.start_discovery(owner_id, sources, body.query.strip())
     return {"started": started, "running": True,
             "message": "Searching… results appear in a minute." if started else "A search is already running."}
@@ -184,7 +206,9 @@ async def import_job(job_id: int, owner_id: int = Depends(owner)):
         if not job:
             raise HTTPException(404, "Job not found")
         prof = await A.get_profile(s, owner_id)
-        lead = await A.import_board_job(s, owner_id, job, A.csv(prof.preferred_roles))
+        # AI scoring on import is a paid call: admins only (normal users get rule-based scoring)
+        lead = await A.import_board_job(s, owner_id, job, A.csv(prof.preferred_roles),
+                                        use_llm=acc.is_admin_id(owner_id))
         await s.commit()
         return {"lead_id": lead.id}
 
@@ -201,6 +225,7 @@ async def make_draft(lead_id: int, body: DraftCreate, owner_id: int = Depends(ow
             raise HTTPException(404, "Not found")
         if l.scam_risk == "high":
             raise HTTPException(409, "This opportunity has high scam risk. Drafting is disabled for it.")
+        await acc.consume(s, owner_id, "draft")       # raises LimitReached -> 429
         d = await A.create_draft(s, owner_id, l, body.contact_id)
         await s.commit()
         return draft_dict(d, l)
@@ -240,6 +265,9 @@ async def draft_action(draft_id: int, body: DraftAction, owner_id: int = Depends
         elif body.action in ("skip", "reject"):
             d.status = "skipped" if body.action == "skip" else "rejected"
         elif body.action in ("approve", "retry"):
+            if d.channel == "telegram" and not acc.is_admin_id(owner_id):
+                raise HTTPException(403, "Sending from a connected Telegram account is admin-only. "
+                                         "Copy the message, open the chat, then tap Mark as sent.")
             if body.text and body.text.strip() and body.text.strip() != d.text.strip():
                 d.text, d.generated_by = body.text.strip(), "edited"
             if d.channel == "telegram" and await A.already_contacted(s, owner_id, "telegram", d.recipient):
@@ -336,7 +364,8 @@ async def get_settings_(owner_id: int = Depends(owner)):
         await s.commit()
         return {"stopped": st.stopped, "daily_limit": st.daily_limit, "min_interval_sec": st.min_interval_sec,
                 "auto_search_hours": st.auto_search_hours, "queries": st.queries, "tg_channels": st.tg_channels,
-                "providers": S.configured()}
+                "providers": S.configured() if acc.is_admin_id(owner_id) else {},
+                "is_admin": acc.is_admin_id(owner_id)}
 
 
 @router.put("/settings")
@@ -344,7 +373,8 @@ async def put_settings(body: SettingsIn, owner_id: int = Depends(owner)):
     async with SessionLocal() as s:
         st = await A.get_state(s, owner_id)
         st.daily_limit, st.min_interval_sec = body.daily_limit, body.min_interval_sec
-        st.auto_search_hours = body.auto_search_hours
+        # auto-search spends paid provider calls in the background: admin-only
+        st.auto_search_hours = body.auto_search_hours if acc.is_admin_id(owner_id) else 0
         st.queries = "\n".join([q.strip() for q in body.queries.split("\n") if q.strip()][:12])
         st.tg_channels = "\n".join([c.strip().lstrip("@") for c in body.tg_channels.replace(",", "\n").split("\n")
                                     if c.strip()][:15])
