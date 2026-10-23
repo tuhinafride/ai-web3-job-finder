@@ -201,7 +201,7 @@ your own account with Telegram's normal login: phone number → login code → o
 - **Disconnect** logs the session out at Telegram and deletes it. You can also end it in Telegram → Settings → Devices.
 - Never share a login code in any chat. Telegram blocks logins whose codes were forwarded in chats.
 
-## AI Job Discovery & Outreach Agent (owner only)
+## AI Job Discovery & Outreach Agent
 
 The owner (IDs in `ADMIN_IDS`) gets a different navigation in the Mini App:
 **Home** (dashboard, Find Jobs, Stop Agent) · **Jobs** (company boards + X / Google / Telegram leads with filters) ·
@@ -226,3 +226,27 @@ halts searching and sending immediately. AI drafts that add numbers/claims not i
 
 Google's own Custom Search JSON API is closed to new customers, so it isn't used. X DMs aren't automated:
 the app copies your message and opens the profile so you send it yourself.
+
+## Multi-user, referrals and admin panel
+
+Everyone who opens the Mini App from the bot is signed in by Telegram itself. The server checks
+Telegram's signed `initData` (HMAC with the bot token, max age `INITDATA_MAX_AGE`) on every API call
+and never trusts a user id or admin flag sent by the browser. No passwords or login codes are asked
+from normal users.
+
+- **Every user** gets the job board, the AI job agent (their own leads, drafts, tracker, agent profile)
+  and a **Profile** tab: Telegram connection status, personal invite link (Copy / Share), invite stats,
+  leaderboard, today's limits and sign-out (clears this device's app data only).
+- **Admin-only**: sending from the personal Telegram account, reading Telegram channels, auto-search,
+  and the **Admin** tab (dashboard with DAU/WAU/MAU and a 30-day chart, users table with search,
+  status filter, pagination, CSV export, suspend/reactivate with an audit log, referral reward settings).
+- **Admins** = union of `ADMIN_IDS` and `ADMIN_TELEGRAM_IDS`. Admins can't suspend themselves or other admins.
+- **Referrals**: `https://t.me/<bot>?start=ref_<code>` (bot) and, when `MINIAPP_SHORT_NAME` is set,
+  `https://t.me/<bot>/<short>?startapp=ref_<code>` (Mini App). Only brand-new users are attributed,
+  one inviter per user ever (database unique key), no self-invites, invites from suspended users are
+  ignored, bot accounts are rejected, and at most `REFERRAL_HOURLY_CAP` valid invites per inviter per hour.
+  Rewards are **points only** (no cash or token value), configured by an admin.
+- **Limits**: `USER_DAILY_SEARCHES` search runs and `USER_DAILY_DRAFTS` message drafts per user per day
+  (UTC). Admins are unlimited. API calls are rate limited per user and per IP (in memory).
+- **Database upgrade**: on startup the app adds the new columns to the existing `users` table with
+  `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` (Postgres) and creates the new tables. Nothing is dropped.
