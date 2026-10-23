@@ -54,13 +54,13 @@ def safe_ai_text(text: str, p, lead) -> bool:
 
 async def generate(p, lead) -> tuple[str, str]:
     """Returns (text, generated_by)."""
-    if llm.enabled():
+    if llm.enabled("draft"):
         post = (f"Project: {lead.project}\nTitle: {lead.title}\nRole: {ROLE_LABELS.get(lead.role, '')}\n"
                 f"Responsibilities: {lead.responsibilities}\nRequirements: {lead.requirements}\n"
                 f"Pay: {lead.pay_status} {lead.pay_detail}\nApply: {lead.apply_method}\n"
                 f"Post text: {lead.raw_text[:2500]}")
         try:
-            data = await llm.chat_json(DRAFT_SYSTEM, f"PROFILE:\n{profile_facts(p)}\n\nPOST:\n{post}", max_tokens=500)
+            data = await llm.chat_json(DRAFT_SYSTEM, f"PROFILE:\n{profile_facts(p)}\n\nPOST:\n{post}", max_tokens=500, purpose="draft")
             text = str(data.get("message") or "").strip()
             if safe_ai_text(text, p, lead):
                 return text, "ai"
