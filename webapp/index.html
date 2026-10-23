@@ -1,1 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>Web3 Job Finder</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <div class="logo">W3</div>
+      <div>
+        <h1>Web3 Job Finder</h1>
+        <p id="stat" class="muted">Loading jobs…</p>
+      </div>
+    </div>
+  </header>
 
+  <main>
+    <!-- JOBS / FOR YOU -->
+    <section id="view-jobs" class="view active">
+      <div class="searchbar">
+        <input id="q" type="search" placeholder="Search title, company, skill…" autocomplete="off" />
+      </div>
+      <div class="chips" id="cat-chips"></div>
+      <div class="chips toggles">
+        <button class="chip toggle" data-flag="remote">🌍 Remote</button>
+        <button class="chip toggle" data-flag="has_salary">💰 Salary listed</button>
+        <button class="chip toggle" data-flag="verified_only">🏢 Company boards only</button>
+      </div>
+      <div id="list" class="list"></div>
+      <button id="more" class="btn ghost hidden">Load more</button>
+    </section>
+
+    <section id="view-saved" class="view">
+      <h2 class="section-title">Saved jobs</h2>
+      <div id="saved-list" class="list"></div>
+    </section>
+
+    <section id="view-profile" class="view">
+      <h2 class="section-title">Your profile</h2>
+      <div class="card">
+        <label class="label">Roles you want</label>
+        <div class="chips wrap" id="role-chips"></div>
+        <label class="label" for="skills">Skills (comma separated)</label>
+        <input id="skills" type="text" placeholder="discord, telegram, english, solidity…" />
+        <label class="switch"><input type="checkbox" id="remote_only" /> <span>Remote jobs only</span></label>
+        <label class="switch"><input type="checkbox" id="alerts_enabled" /> <span>Send me job alerts in Telegram</span></label>
+        <button id="save-profile" class="btn">Save profile</button>
+        <p class="muted small">Alerts are opt-in and only include jobs matching your roles or skills.</p>
+      </div>
+      <div class="card warn">
+        <b>Stay safe.</b> Real employers never ask you to pay a fee, buy tokens, connect your wallet or share a seed phrase to apply.
+        <span class="badge ats">🏢 Company board</span> jobs come straight from the employer's careers system.
+        <span class="badge agg">🔎 Third-party</span> listings should be checked on the company's own site.
+      </div>
+    </section>
+  </main>
+
+  <!-- detail sheet -->
+  <div id="sheet" class="sheet hidden" role="dialog" aria-modal="true">
+    <div class="sheet-body">
+      <button class="close" id="sheet-close" aria-label="Close">✕</button>
+      <div id="detail"></div>
+    </div>
+  </div>
+
+  <nav class="tabbar">
+    <button class="tab active" data-view="jobs" data-mode="all">🆕<span>Jobs</span></button>
+    <button class="tab" data-view="jobs" data-mode="forme">🎯<span>For you</span></button>
+    <button class="tab" data-view="saved">⭐<span>Saved</span></button>
+    <button class="tab" data-view="profile">👤<span>Profile</span></button>
+  </nav>
+
+  <div id="toast" class="toast hidden"></div>
+  <div id="gate" class="gate hidden">
+    <div class="card">
+      <h2>Open inside Telegram</h2>
+      <p class="muted">This Mini App signs you in securely through Telegram. Open it from the bot's <b>Jobs App</b> button.</p>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
