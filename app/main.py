@@ -22,12 +22,14 @@ from pydantic import BaseModel, Field
 
 from . import services as svc
 from .bot.handlers import deliver_alerts, router
+from .bot.automation_handlers import router as automation_router
 from .classify import CATEGORY_LABELS
 from .config import get_settings
 from .db import Job, SessionLocal, init_db
 from . import userclient as uc
 from .outreach import models as _outreach_models  # noqa: F401  (registers tables)
 from .outreach import agent as outreach_agent
+from .outreach import automation
 from .outreach.api import router as agent_router
 from . import accounts as acc
 from .admin_api import router as admin_router
@@ -55,6 +57,7 @@ log = logging.getLogger("app")
 settings = get_settings()
 bot: Bot | None = None
 dp = Dispatcher()
+dp.include_router(automation_router)
 dp.include_router(router)
 _tasks: list[asyncio.Task] = []
 
@@ -67,6 +70,12 @@ COMMANDS = [
     BotCommand(command="saved", description="Saved jobs"),
     BotCommand(command="profile", description="Your roles & skills"),
     BotCommand(command="help", description="Help"),
+]
+ADMIN_COMMANDS = COMMANDS + [
+    BotCommand(command="auto_status", description="Automation status & controls"),
+    BotCommand(command="auto_start", description="Start full automation"),
+    BotCommand(command="auto_pause", description="Pause automation"),
+    BotCommand(command="auto_stop", description="Stop automation"),
 ]
 
 
@@ -96,7 +105,12 @@ async def outreach_loop():
                 states = (await s.scalars(select(_outreach_models.AgentState).where(
                     _outreach_models.AgentState.auto_search_hours > 0,
                     _outreach_models.AgentState.stopped.is_(False)))).all()
+            async with SessionLocal() as s:
+                auto_on = set((await s.scalars(select(_outreach_models.AutomationState.owner_id).where(
+                    _outreach_models.AutomationState.enabled.is_(True)))).all())
             for st in states:
+                if st.owner_id in auto_on:      # full automation mode owns the schedule for this admin
+                    continue
                 due = not st.last_search_at or utcnow() - st.last_search_at >= timedelta(hours=st.auto_search_hours)
                 if due and st.owner_id in settings.admin_ids:
                     outreach_agent.start_discovery(st.owner_id, ["google", "x", "telegram"])
@@ -117,9 +131,12 @@ async def lifespan(_: FastAPI):
             log.error("Telegram setup failed: %s", type(e).__name__)
     else:
         log.warning("BOT_TOKEN not set: API/Mini App run, Telegram bot disabled")
+    automation.set_bot(bot)
     if not settings.disable_scheduler:
         _tasks.append(asyncio.create_task(refresh_loop()))
         _tasks.append(asyncio.create_task(outreach_loop()))
+        # full automation scheduler: runs whether or not the Mini App is open, resumes after restarts
+        _tasks.append(automation.start_scheduler())
     yield
     for t in _tasks:
         t.cancel()
@@ -139,6 +156,12 @@ async def setup_bot(bot: Bot):
     except Exception:
         pass
     await bot.set_my_commands(COMMANDS)
+    from aiogram.types import BotCommandScopeChat
+    for admin_id in settings.admin_ids:     # admins also see the automation commands in their menu
+        try:
+            await bot.set_my_commands(ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=admin_id))
+        except Exception:
+            pass   # admin hasn't started the bot yet
     if settings.webapp_url.startswith("https://"):
         await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(
             text="Jobs App", web_app=WebAppInfo(url=settings.webapp_url)))
