@@ -26,7 +26,7 @@
       ...opts,
       headers: { "Content-Type": "application/json", "X-Telegram-Init-Data": initData, ...(opts.headers || {}) },
     });
-    if (res.status === 401) { $("#gate").classList.remove("hidden"); throw new Error("auth"); }
+    if (res.status === 401) { showGate("mismatch"); throw new Error("auth"); }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       const err = new Error(body.detail || res.statusText);
@@ -34,6 +34,20 @@
       throw err;
     }
     return res.json();
+  }
+
+  async function showGate(reason) {
+    $("#gate").classList.remove("hidden");
+    let bot = "";
+    try { bot = (await (await fetch("/api/botinfo")).json()).username || ""; } catch (_) {}
+    const name = bot ? "@" + bot : "the bot";
+    $("#gate-msg").textContent = reason === "mismatch"
+      ? `This app belongs to ${name}. You opened it from a different bot or an old button. Open ${name}, send /start, then tap the Jobs App button.`
+      : `Open ${name} in Telegram, send /start, then tap the Jobs App button (a plain link can't sign you in).`;
+    if (bot) {
+      const b = $("#gate-open"); b.classList.remove("hidden");
+      b.onclick = () => { const u = "https://t.me/" + bot; if (tg && tg.openTelegramLink) tg.openTelegramLink(u); else location.href = u; };
+    }
   }
 
   function toast(msg) {
@@ -356,7 +370,7 @@
 
   // ------------------------------------------------ boot
   (async () => {
-    if (!initData) { $("#gate").classList.remove("hidden"); return; }
+    if (!initData) { showGate("nolink"); return; }
     try {
       const [meta, profile] = await Promise.all([api("/api/meta"), api("/api/profile")]);
       state.categories = meta.categories;
