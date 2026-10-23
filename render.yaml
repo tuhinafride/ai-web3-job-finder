@@ -20,6 +20,18 @@ services:
         sync: false          # e.g. https://web3-job-finder.onrender.com
       - key: ADMIN_IDS
         sync: false
+      - key: ADMIN_TELEGRAM_IDS
+        sync: false          # comma list; merged with ADMIN_IDS
+      - key: BOT_USERNAME
+        sync: false          # optional; read from Telegram getMe when empty
+      - key: MINIAPP_SHORT_NAME
+        sync: false          # optional; from BotFather /newapp
+      - key: USER_DAILY_SEARCHES
+        value: "3"
+      - key: USER_DAILY_DRAFTS
+        value: "20"
+      - key: REFERRAL_HOURLY_CAP
+        value: "20"
       - key: CHANNEL_ID
         sync: false
       - key: WEBHOOK_SECRET
