@@ -89,6 +89,12 @@ async def cmd_start(m: Message, state: FSMContext):
     )
 
 
+@router.message(Command("myid"))
+async def cmd_myid(m: Message):
+    await m.answer(f"Your Telegram user ID: <code>{m.from_user.id}</code>\n"
+                   "Put it in ADMIN_IDS on the server to unlock the owner tools (account login).")
+
+
 @router.message(Command("help"))
 async def cmd_help(m: Message):
     extra = ""
