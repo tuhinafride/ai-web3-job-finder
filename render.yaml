@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: ai-web3-job-finder
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    healthCheckPath: /health
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: WEBAPP_URL
+        sync: false
+      - key: ALERT_INTERVAL_SECONDS
+        value: "900"
