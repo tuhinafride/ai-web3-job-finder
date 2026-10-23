@@ -50,12 +50,12 @@ services:
         sync: false
       - key: TWITTERAPI_IO_KEY
         sync: false
-      - key: XAI_API_KEY
-        sync: false
       - key: OPENAI_API_KEY
-        sync: false
+        sync: false          # optional (ChatGPT); only a fallback
       - key: LLM_API_KEY
-        sync: false
+        sync: false          # free Gemini key (aistudio.google.com/apikey): AI scoring, drafts, Google + X search
+      # Optional overrides (code defaults shown): LLM_MODEL=gemini-2.5-flash, LLM_MAX_CALLS_PER_RUN=5,
+      # LLM_DAILY_CALL_CAP=200, GEMINI_GROUNDING_DAILY_CAP=150. Add them in the dashboard only if needed.
       - key: FETCH_INTERVAL_MINUTES
         value: "60"
       - key: DATABASE_URL
