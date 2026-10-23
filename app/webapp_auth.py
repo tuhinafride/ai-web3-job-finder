@@ -23,7 +23,13 @@ class InitDataError(ValueError):
 
 
 def validate_init_data(init_data: str, bot_token: str, max_age: int = 86400) -> dict:
-    if not init_data or not bot_token:
+    """Returns the verified Telegram user dict."""
+    return validate_init_data_full(init_data, bot_token, max_age)["user"]
+
+
+def validate_init_data_full(init_data: str, bot_token: str, max_age: int = 86400) -> dict:
+    """Returns {"user": {...}, "start_param": str, "auth_date": int} after HMAC + age checks."""
+    if not init_data or len(init_data) > 8192 or not bot_token:
         raise InitDataError("missing init data")
     pairs = dict(parse_qsl(init_data, keep_blank_values=True, strict_parsing=False))
     received = pairs.pop("hash", None)
@@ -41,10 +47,15 @@ def validate_init_data(init_data: str, bot_token: str, max_age: int = 86400) -> 
         raise InitDataError("bad auth_date")
     if max_age and time.time() - auth_date > max_age:
         raise InitDataError("init data expired")
-    user = json.loads(pairs.get("user", "{}") or "{}")
-    if not isinstance(user, dict) or not isinstance(user.get("id"), int):
+    if auth_date > time.time() + 300:
+        raise InitDataError("bad auth_date")
+    try:
+        user = json.loads(pairs.get("user", "{}") or "{}")
+    except ValueError:
+        raise InitDataError("bad user")
+    if not isinstance(user, dict) or not isinstance(user.get("id"), int) or isinstance(user.get("id"), bool):
         raise InitDataError("no user")
-    return user
+    return {"user": user, "start_param": str(pairs.get("start_param", ""))[:64], "auth_date": auth_date}
 
 
 async def telegram_user(x_telegram_init_data: str = Header(default="")) -> dict:
