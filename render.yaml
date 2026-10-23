@@ -1,15 +1,39 @@
+# Render Blueprint: creates the web service + a PostgreSQL database.
+# Render dashboard -> New -> Blueprint -> pick this repo.
 services:
   - type: web
-    name: ai-web3-job-finder
+    name: web3-job-finder
     runtime: python
     plan: free
+    region: singapore
     buildCommand: pip install -r requirements.txt
-    startCommand: python app.py
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers
     healthCheckPath: /health
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: BOT_MODE
+        value: webhook
       - key: BOT_TOKEN
+        sync: false          # Render asks you for it; it is never stored in the repo
+      - key: PUBLIC_BASE_URL
+        sync: false          # e.g. https://web3-job-finder.onrender.com
+      - key: ADMIN_IDS
         sync: false
-      - key: WEBAPP_URL
+      - key: CHANNEL_ID
         sync: false
-      - key: ALERT_INTERVAL_SECONDS
-        value: "900"
+      - key: WEBHOOK_SECRET
+        generateValue: true
+      - key: FETCH_INTERVAL_MINUTES
+        value: "60"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: web3-jobs-db
+          property: connectionString
+
+databases:
+  - name: web3-jobs-db
+    plan: free
+    region: singapore
+    databaseName: web3jobs
+    user: web3jobs
