@@ -21,6 +21,28 @@
   <main>
     <!-- JOBS / FOR YOU -->
     <section id="view-jobs" class="view active">
+      <div id="src-seg" class="seg hidden">
+        <button class="segbtn on" data-src="board">🏢 Boards</button>
+        <button class="segbtn" data-src="x">𝕏 X</button>
+        <button class="segbtn" data-src="google">🔎 Google</button>
+        <button class="segbtn" data-src="telegram">✈️ Telegram</button>
+        <button class="segbtn" data-src="">All leads</button>
+      </div>
+      <div id="leads-pane" class="hidden">
+        <div class="searchbar"><input id="lq" type="search" placeholder="Search project, title…" autocomplete="off" /></div>
+        <div class="filters">
+          <select id="f-role"><option value="">All roles</option></select>
+          <select id="f-pay"><option value="">Any pay</option><option value="paid">💰 Paid</option><option value="unknown">Pay unknown</option><option value="unpaid">Unpaid</option></select>
+          <select id="f-fresh"><option value="">Any date</option><option value="current">Current (≤30d)</option><option value="unknown">Date unknown</option><option value="old">Old</option></select>
+          <select id="f-rel"><option value="0">Any relevance</option><option value="50">50%+</option><option value="70">70%+</option><option value="85">85%+</option></select>
+          <select id="f-sort"><option value="relevance">Sort: relevance</option><option value="date">Sort: newest found</option><option value="posted">Sort: newest posted</option></select>
+          <label class="switch mini"><input type="checkbox" id="f-safe" /> <span>Hide flagged</span></label>
+        </div>
+        <button id="find-here" class="btn">🔍 Find Jobs</button>
+        <div id="leads-list" class="list"></div>
+        <button id="leads-more" class="btn ghost hidden">Load more</button>
+      </div>
+      <div id="board-pane">
       <div class="searchbar">
         <input id="q" type="search" placeholder="Search title, company, skill…" autocomplete="off" />
       </div>
@@ -32,6 +54,86 @@
       </div>
       <div id="list" class="list"></div>
       <button id="more" class="btn ghost hidden">Load more</button>
+      </div>
+    </section>
+
+    <!-- OWNER: DASHBOARD -->
+    <section id="view-home" class="view">
+      <div class="card agent-card">
+        <div class="status-row"><span id="ag-dot" class="dot"></span><b id="ag-title">Agent</b></div>
+        <p id="ag-sub" class="muted small"></p>
+        <div class="chips wrap" id="find-sources">
+          <button class="chip on" data-s="google">🔎 Google</button>
+          <button class="chip on" data-s="x">𝕏 X</button>
+          <button class="chip on" data-s="telegram">✈️ Telegram</button>
+        </div>
+        <input id="find-q" type="text" placeholder="Optional: custom search, e.g. Solana moderator hiring" />
+        <div class="btns"><button id="find-go" class="btn">🔍 Find Jobs</button><button id="stop-go" class="btn danger">⏹ Stop Agent</button></div>
+      </div>
+      <div class="stats" id="stats"></div>
+      <div id="prov-warn" class="card warn hidden"></div>
+      <h3 class="section-title small-title">Recent activity</h3>
+      <div id="home-logs" class="list"></div>
+    </section>
+
+    <!-- OWNER: OUTREACH -->
+    <section id="view-outreach" class="view">
+      <div class="seg" id="out-seg">
+        <button class="segbtn on" data-ds="pending">Pending approval</button>
+        <button class="segbtn" data-ds="approved,sending">Queued</button>
+        <button class="segbtn" data-ds="sent">Sent</button>
+        <button class="segbtn" data-ds="failed,skipped,rejected">Skipped / failed</button>
+        <button class="segbtn" data-ds="contacts">Contacts</button>
+      </div>
+      <div id="drafts-list" class="list"></div>
+    </section>
+
+    <!-- OWNER: TRACKER -->
+    <section id="view-tracker" class="view">
+      <div class="seg" id="trk-seg">
+        <button class="segbtn on" data-ts="saved,applied,interview,offer,rejected">Applications</button>
+        <button class="segbtn" data-ts="boards">Saved board jobs</button>
+      </div>
+      <div id="tracker-list" class="list"></div>
+    </section>
+
+    <!-- OWNER: SETTINGS -->
+    <section id="view-settings" class="view">
+      <div class="seg" id="set-seg">
+        <button class="segbtn on" data-ss="account">Telegram account</button>
+        <button class="segbtn" data-ss="pro">My profile</button>
+        <button class="segbtn" data-ss="agent">Agent</button>
+        <button class="segbtn" data-ss="matching">Job alerts</button>
+        <button class="segbtn" data-ss="logs">Logs</button>
+      </div>
+      <div id="set-account" class="setpane"></div>
+      <div id="set-pro" class="setpane hidden">
+        <div class="card">
+          <label class="label">Name</label><input id="p-name" type="text" />
+          <label class="label">Location / timezone</label><input id="p-location" type="text" />
+          <label class="label">Headline</label><input id="p-headline" type="text" />
+          <label class="label">Experience (only true facts)</label><textarea id="p-experience" rows="4"></textarea>
+          <label class="label">Skills</label><textarea id="p-skills" rows="3"></textarea>
+          <label class="label">Links (portfolio, X, LinkedIn)</label><input id="p-links" type="text" />
+          <label class="label">Preferred roles</label><div class="chips wrap" id="p-roles"></div>
+          <label class="label">Base message template</label><textarea id="p-template" rows="9"></textarea>
+          <button id="p-save" class="btn">Save profile</button>
+          <p class="muted small">Drafts only use these facts. AI drafts that add numbers or claims not found here or in the job post are thrown away and the template is used instead.</p>
+        </div>
+      </div>
+      <div id="set-agent" class="setpane hidden">
+        <div class="card">
+          <label class="label">Max Telegram messages per 24h (1–30)</label><input id="a-limit" type="text" inputmode="numeric" />
+          <label class="label">Minimum gap between messages, seconds (60–3600)</label><input id="a-gap" type="text" inputmode="numeric" />
+          <label class="label">Auto search every N hours (0 = only when you tap Find Jobs)</label><input id="a-auto" type="text" inputmode="numeric" />
+          <label class="label">Search phrases (one per line)</label><textarea id="a-queries" rows="6"></textarea>
+          <label class="label">Public Telegram job channels to read (one per line, e.g. @channelname)</label><textarea id="a-channels" rows="4"></textarea>
+          <button id="a-save" class="btn">Save agent settings</button>
+          <div id="a-prov" class="muted small"></div>
+        </div>
+      </div>
+      <div id="set-matching" class="setpane hidden"></div>
+      <div id="set-logs" class="setpane hidden"><div id="logs-list" class="list"></div></div>
     </section>
 
     <section id="view-saved" class="view">
@@ -119,7 +221,14 @@
     </div>
   </div>
 
-  <nav class="tabbar">
+  <nav class="tabbar hidden" id="owner-nav">
+    <button class="tab" data-view="home">🏠<span>Home</span></button>
+    <button class="tab" data-view="jobs" data-mode="all">💼<span>Jobs</span></button>
+    <button class="tab" data-view="outreach">✉️<span>Outreach</span><i id="badge-pending" class="nbadge hidden"></i></button>
+    <button class="tab" data-view="tracker">📋<span>Tracker</span></button>
+    <button class="tab" data-view="settings">⚙️<span>Settings</span></button>
+  </nav>
+  <nav class="tabbar" id="user-nav">
     <button class="tab active" data-view="jobs" data-mode="all">🆕<span>Jobs</span></button>
     <button class="tab" data-view="jobs" data-mode="forme">🎯<span>For you</span></button>
     <button class="tab" data-view="saved">⭐<span>Saved</span></button>
@@ -136,5 +245,6 @@
     </div>
   </div>
   <script src="app.js"></script>
+  <script src="agent.js"></script>
 </body>
 </html>
