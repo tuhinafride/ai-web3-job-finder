@@ -200,3 +200,29 @@ your own account with Telegram's normal login: phone number → login code → o
 - The session is encrypted (Fernet) with `SESSION_ENC_KEY` (falls back to `WEBHOOK_SECRET`). Changing the key forces a new login.
 - **Disconnect** logs the session out at Telegram and deletes it. You can also end it in Telegram → Settings → Devices.
 - Never share a login code in any chat. Telegram blocks logins whose codes were forwarded in chats.
+
+## AI Job Discovery & Outreach Agent (owner only)
+
+The owner (IDs in `ADMIN_IDS`) gets a different navigation in the Mini App:
+**Home** (dashboard, Find Jobs, Stop Agent) · **Jobs** (company boards + X / Google / Telegram leads with filters) ·
+**Outreach** (pending approval, queued, sent, skipped/failed, contacts) · **Tracker** (applications, saved jobs) ·
+**Settings** (Telegram account, professional profile, agent limits, job alerts, logs). Public users keep the original app.
+
+**Pipeline:** discover → read the public source page → qualify (role, pay, remote, deadline, apply method,
+contacts, freshness, scam flags, relevance) → dedupe (URL + near-duplicate text) → draft → you approve/edit/skip/reject →
+send from your Telegram account (Telegram only) or copy/open for X and email → recorded, never messaged twice.
+
+**Safety rails:** nothing is sent without your tap; max messages per 24h (default 10, cap 30); minimum gap between
+messages (default 180s); one message per recipient ever; only real people (not channels/bots) can be messaged;
+Telegram `FloodWait`/`PeerFlood` automatically stops the agent; high-scam-risk leads can't be drafted; **Stop Agent**
+halts searching and sending immediately. AI drafts that add numbers/claims not in your profile or the post are discarded.
+
+| Env var | What for | Where to get it |
+|---|---|---|
+| `SERPER_API_KEY` *or* `BRAVE_API_KEY` | Google-style web search | serper.dev (2,500 free queries) / brave.com/search/api ($5 free monthly credit) |
+| `X_BEARER_TOKEN` *or* `TWITTERAPI_IO_KEY` | X post search | developer.x.com (pay per use) / twitterapi.io (third party, small free credit) |
+| `LLM_API_KEY` (+ optional `LLM_BASE_URL`, `LLM_MODEL`) | AI qualification and drafts | Any OpenAI-compatible API. Default is Google Gemini (aistudio.google.com/apikey) |
+| Telegram account | channel reading + sending | Mini App → Settings → Telegram account (see section above) |
+
+Google's own Custom Search JSON API is closed to new customers, so it isn't used. X DMs aren't automated:
+the app copies your message and opens the profile so you send it yourself.
