@@ -30,7 +30,9 @@
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       if (res.status === 403 && body.detail === "account_suspended") { showGate("suspended"); throw new Error("auth"); }
-      const detail = Array.isArray(body.detail) ? (body.detail[0] && body.detail[0].msg) : body.detail;
+      // FastAPI validation errors: name the field, e.g. "daily_limit: Input should be less than or equal to 30"
+      const v = Array.isArray(body.detail) ? body.detail[0] : null;
+      const detail = v ? `${(v.loc || []).filter((x) => x !== "body" && x !== "query").join(".") || "input"}: ${v.msg}` : body.detail;
       const err = new Error(detail || res.statusText);
       err.code = body.code || ""; err.status = res.status;
       throw err;
