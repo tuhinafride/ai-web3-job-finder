@@ -64,9 +64,11 @@
     $("#p-save").onclick = (e) => busy(e.target, saveProfile);
     $("#a-save").onclick = (e) => busy(e.target, saveAgent);
     document.querySelector('#owner-nav .tab[data-view="home"]').click();
+    if (W.isAdmin && W.initAutomation) W.initAutomation();
   };
 
-  W.initOwner = () => W.initAgent(true);   // backwards compatible name
+  W.initOwner = () => W.initAgent(true);
+  W.reloadHome = () => { if ($("#view-home").classList.contains("active")) loadHome(); };   // backwards compatible name
   const defaultSources = () => (W.isAdmin ? ["google", "x", "telegram"] : ["google", "x"]);
 
   W.onView = (view) => {
@@ -100,9 +102,9 @@
       ["Applications", d.applied], ["Saved", d.saved], ["Board jobs", d.board_jobs]];
     $("#stats").replaceChildren(...stats.map(([k, v]) => { const c = el("div", "stat"); c.append(el("b", null, String(v)), el("span", null, k)); return c; }));
     const p = d.providers || {}, miss = [];
-    if (d.is_admin && !p.google) miss.push("Google search (add SERPER_API_KEY or BRAVE_API_KEY on Render)");
-    if (d.is_admin && !p.x) miss.push("X search (add XAI_API_KEY for Grok)");
-    if (d.is_admin && !p.llm) miss.push("AI writing (add OPENAI_API_KEY for ChatGPT). Rules and your template are used until then");
+    if (d.is_admin && !p.google) miss.push("Google search (add LLM_API_KEY with a free Gemini key, or SERPER_API_KEY / BRAVE_API_KEY on Render)");
+    if (d.is_admin && !p.x) miss.push("X search (add LLM_API_KEY with a free Gemini key, or X_BEARER_TOKEN / TWITTERAPI_IO_KEY)");
+    if (d.is_admin && !p.llm) miss.push("AI scoring and drafts (add LLM_API_KEY, a free Gemini key from aistudio.google.com). Rules and your template are used until then");
     if (d.is_admin && !d.telegram_connected) miss.push("Telegram account (Settings → Telegram account) for channel search and sending");
     $("#prov-warn").classList.toggle("hidden", !miss.length);
     $("#prov-warn").replaceChildren(el("b", null, "Not set up yet: "), ...miss.map((m) => el("div", null, "• " + m)));
@@ -369,7 +371,7 @@
   }
 
   // ------------------------------------------------ settings
-  async function loadSettingsPane(v) {
+  async function loadSettingsPane(v, keepWarn = false) {
     if (v === "me" && W.loadMe) W.loadMe();
     if (v === "account") W.loadAccount();
     if (v === "pro") {
@@ -386,12 +388,14 @@
     if (v === "agent") {
       try {
         const s = await api("/api/agent/settings");
+        if (!keepWarn) $("#a-warn").classList.add("hidden");
         $("#a-limit").value = s.daily_limit; $("#a-gap").value = s.min_interval_sec; $("#a-auto").value = s.auto_search_hours;
         $("#a-queries").value = s.queries; $("#a-channels").value = s.tg_channels;
         const p = s.providers || {};
         $("#a-auto").disabled = !s.is_admin;
         if (!s.is_admin) { $("#a-prov").textContent = "Auto search, Telegram channel reading and sending from a Telegram account are admin-only. Your drafts are sent by you, manually."; return; }
-        $("#a-prov").textContent = `Google: ${p.google || "not set"} · X: ${p.x || "not set"} · Messages: ${p.llm_draft || "templates"} · Scoring: ${p.llm_qualify || "rules"}`;
+        const chain = (c) => (c && c.length ? c.join(" → ") : "not set");
+        $("#a-prov").textContent = `Google: ${chain(p.google_chain)} · X: ${chain(p.x_chain)} · Messages: ${p.llm_draft || "templates"} · Scoring: ${p.llm_qualify || "rules"}`;
       } catch (e) { err(e); }
     }
     if (v === "logs") {
@@ -405,14 +409,35 @@
     const body = {};
     ["name", "location", "headline", "experience", "skills", "links", "template"].forEach((k) => body[k] = $(`#p-${k}`).value);
     body.preferred_roles = $$("#p-roles .chip.on").map((b) => b.dataset.k);
+    if (!body.template.trim()) throw new Error("The message template can't be empty.");
+    if (body.template.length > 1500) throw new Error(`Template is too long (${body.template.length}/1500 characters).`);
+    if (body.experience.length > 1500) throw new Error(`Experience is too long (${body.experience.length}/1500 characters).`);
     await api("/api/agent/profile", { method: "PUT", body: JSON.stringify(body) });
     toast("Profile saved ✅");
+    await loadSettingsPane("pro");          // show exactly what the server stored
   }
+  // strict integer parsing: "" / "abc" / "12abc" / 0 are errors, never silently replaced by a default
+  function intField(id, label, min, max) {
+    const raw = $(id).value.trim();
+    if (!/^\d+$/.test(raw)) throw new Error(`${label}: enter a whole number (${min}–${max}).`);
+    const n = parseInt(raw, 10);
+    if (n < min || n > max) throw new Error(`${label}: must be between ${min} and ${max}.`);
+    return n;
+  }
+  W.intField = intField;
   async function saveAgent() {
-    const num = (id, d) => parseInt($(id).value, 10) || d;
-    await api("/api/agent/settings", { method: "PUT", body: JSON.stringify({
-      daily_limit: num("#a-limit", 10), min_interval_sec: num("#a-gap", 180), auto_search_hours: parseInt($("#a-auto").value, 10) || 0,
-      queries: $("#a-queries").value, tg_channels: $("#a-channels").value }) });
-    toast("Agent settings saved ✅");
+    const body = { queries: $("#a-queries").value };
+    if (W.isAdmin) {
+      body.daily_limit = intField("#a-limit", "Max messages per 24h", 1, 30);
+      body.min_interval_sec = intField("#a-gap", "Minimum gap (seconds)", 60, 3600);
+      body.auto_search_hours = intField("#a-auto", "Auto search hours", 0, 48);
+      body.tg_channels = $("#a-channels").value;
+    }
+    const r = await api("/api/agent/settings", { method: "PUT", body: JSON.stringify(body) });
+    const warn = $("#a-warn");
+    warn.textContent = (r.warnings || []).join(" ");
+    warn.classList.toggle("hidden", !(r.warnings || []).length);
+    toast((r.warnings || []).length ? "Saved with notes ⚠️" : "Agent settings saved ✅");
+    await loadSettingsPane("agent", true);  // reload: channels/queries come back normalised by the server
   }
 })();
