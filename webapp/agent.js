@@ -1,4 +1,4 @@
-/* Owner-only AI job discovery + outreach agent UI. Loaded after app.js; uses window.W3 helpers.
+/* AI job discovery + outreach agent UI (every user; sending from a personal account is admin-only). Loaded after app.js; uses window.W3 helpers.
    Everything is rendered with textContent (no HTML injection). No secrets in this file. */
 (() => {
   const W = window.W3 || (window.W3 = {});
@@ -34,17 +34,22 @@
   }
 
   // ------------------------------------------------ init
-  W.isOwner = false;
-  W.initOwner = () => {
+  W.isOwner = false;     // true once the agent UI is set up (any signed-in user)
+  W.isAdmin = false;
+  W.initAgent = (isAdmin) => {
     W.isOwner = true;
+    W.isAdmin = !!isAdmin;
+    if (!W.isAdmin) $$(".admin-only").forEach((n) => { n.classList.remove("on"); });
     $("#user-nav").classList.add("hidden");
     $("#owner-nav").classList.remove("hidden");
     $("#src-seg").classList.remove("hidden");
     // move existing sections into Settings so nothing is duplicated
     const prof = $("#view-profile");
     Array.from(prof.children).forEach((c) => { if (!c.classList.contains("section-title")) $("#set-matching").append(c); });
-    const acct = $("#view-account");
-    Array.from(acct.children).forEach((c) => $("#set-account").append(c));
+    if (W.isAdmin) {   // personal Telegram account login is admin-only
+      const acct = $("#view-account");
+      Array.from(acct.children).forEach((c) => $("#set-account").append(c));
+    }
     seg("#src-seg", "src", (src) => { lstate.source = src; showSource(); });
     seg("#out-seg", "ds", (v) => { dstate = v; loadDrafts(); });
     seg("#trk-seg", "ts", (v) => { tstate = v; loadTracker(); });
@@ -52,14 +57,17 @@
     ["#f-role", "#f-pay", "#f-fresh", "#f-rel", "#f-sort", "#f-safe"].forEach((id) => $(id).onchange = () => loadLeads());
     let deb; $("#lq").oninput = () => { clearTimeout(deb); deb = setTimeout(loadLeads, 350); };
     $("#leads-more").onclick = () => loadLeads(false);
-    $("#find-here").onclick = (e) => busy(e.target, () => findJobs(lstate.source && lstate.source !== "board" ? [lstate.source] : ["google", "x", "telegram"]));
+    $("#find-here").onclick = (e) => busy(e.target, () => findJobs(lstate.source && lstate.source !== "board" ? [lstate.source] : defaultSources()));
     $$("#find-sources .chip").forEach((c) => c.onclick = () => c.classList.toggle("on"));
-    $("#find-go").onclick = (e) => busy(e.target, () => findJobs($$("#find-sources .chip.on").map((c) => c.dataset.s), $("#find-q").value.trim()));
+    $("#find-go").onclick = (e) => busy(e.target, () => findJobs($$("#find-sources .chip.on").map((c) => c.dataset.s).filter((x) => W.isAdmin || x !== "telegram"), $("#find-q").value.trim()));
     $("#stop-go").onclick = (e) => busy(e.target, toggleStop);
     $("#p-save").onclick = (e) => busy(e.target, saveProfile);
     $("#a-save").onclick = (e) => busy(e.target, saveAgent);
     document.querySelector('#owner-nav .tab[data-view="home"]').click();
   };
+
+  W.initOwner = () => W.initAgent(true);   // backwards compatible name
+  const defaultSources = () => (W.isAdmin ? ["google", "x", "telegram"] : ["google", "x"]);
 
   W.onView = (view) => {
     if (!W.isOwner) return;
@@ -67,7 +75,7 @@
     if (view === "jobs") showSource();
     if (view === "outreach") loadDrafts();
     if (view === "tracker") loadTracker();
-    if (view === "settings") { const on = $("#set-seg .segbtn.on"); loadSettingsPane(on ? on.dataset.ss : "account"); }
+    if (view === "settings") { const on = $("#set-seg .segbtn.on"); loadSettingsPane(on ? on.dataset.ss : "me"); }
   };
 
   // ------------------------------------------------ dashboard
@@ -78,19 +86,24 @@
     agentStopped = d.agent.stopped;
     $("#ag-dot").className = "dot " + (d.agent.stopped ? "" : d.agent.running ? "wait" : "on");
     $("#ag-title").textContent = d.agent.stopped ? "Agent stopped" : d.agent.running ? "Searching…" : "Agent ready";
-    $("#ag-sub").textContent = `Telegram account: ${d.telegram_connected ? "connected ✅" : "not connected"} · Sent today ${d.sent_today}/${d.agent.daily_limit}` +
-      (d.agent.last_search_at ? ` · Last search ${W.ago(d.agent.last_search_at)}` : "");
+    const last = d.agent.last_search_at ? ` · Last search ${W.ago(d.agent.last_search_at)}` : "";
+    if (d.is_admin) {
+      $("#ag-sub").textContent = `Telegram account: ${d.telegram_connected ? "connected ✅" : "not connected"} · Sent today ${d.sent_today}/${d.agent.daily_limit}` + last;
+    } else {
+      const L = d.limits || {};
+      $("#ag-sub").textContent = (L.search ? `Searches left today: ${L.search.left}/${L.search.limit} · Drafts left: ${L.draft.left}/${L.draft.limit}` : "") + last;
+    }
     $("#stop-go").textContent = d.agent.stopped ? "▶️ Resume Agent" : "⏹ Stop Agent";
     $("#stop-go").className = "btn " + (d.agent.stopped ? "secondary" : "danger");
     const stats = [["Leads found", d.leads_total], ["New this week", d.leads_week], ["Paid roles", d.paid],
       ["Pending approval", d.pending], ["Sent", d.sent], ["Flagged risky", d.flagged],
       ["Applications", d.applied], ["Saved", d.saved], ["Board jobs", d.board_jobs]];
     $("#stats").replaceChildren(...stats.map(([k, v]) => { const c = el("div", "stat"); c.append(el("b", null, String(v)), el("span", null, k)); return c; }));
-    const p = d.providers, miss = [];
-    if (!p.google) miss.push("Google search (add SERPER_API_KEY or BRAVE_API_KEY on Render)");
-    if (!p.x) miss.push("X search (add XAI_API_KEY for Grok)");
-    if (!p.llm) miss.push("AI writing (add OPENAI_API_KEY for ChatGPT). Rules and your template are used until then");
-    if (!d.telegram_connected) miss.push("Telegram account (Settings → Telegram account) for channel search and sending");
+    const p = d.providers || {}, miss = [];
+    if (d.is_admin && !p.google) miss.push("Google search (add SERPER_API_KEY or BRAVE_API_KEY on Render)");
+    if (d.is_admin && !p.x) miss.push("X search (add XAI_API_KEY for Grok)");
+    if (d.is_admin && !p.llm) miss.push("AI writing (add OPENAI_API_KEY for ChatGPT). Rules and your template are used until then");
+    if (d.is_admin && !d.telegram_connected) miss.push("Telegram account (Settings → Telegram account) for channel search and sending");
     $("#prov-warn").classList.toggle("hidden", !miss.length);
     $("#prov-warn").replaceChildren(el("b", null, "Not set up yet: "), ...miss.map((m) => el("div", null, "• " + m)));
     $("#home-logs").replaceChildren(...(d.recent_logs.length ? d.recent_logs.map(logRow) : [el("div", "empty", "No activity yet. Tap Find Jobs.")]));
@@ -270,7 +283,16 @@
     const btns = el("div", "btns");
     const act = (action, extra = {}) => api(`/api/agent/drafts/${d.id}`, { method: "POST", body: JSON.stringify({ action, ...extra }) });
     if (d.status !== "sent") {
-      if (d.channel === "telegram") {
+      if (d.channel === "telegram" && !W.isAdmin) {
+        // normal users send manually from their own Telegram app
+        const open = el("button", "btn", "📋 Copy & open Telegram chat");
+        open.onclick = () => {
+          copy(ta.value);
+          const u = `https://t.me/${encodeURIComponent(d.recipient)}`;
+          if (window.Telegram && Telegram.WebApp && Telegram.WebApp.openTelegramLink) Telegram.WebApp.openTelegramLink(u); else W.openLink(u);
+        };
+        btns.append(open);
+      } else if (d.channel === "telegram") {
         const send = el("button", "btn", d.status === "failed" ? "🔁 Retry send" : "✅ Approve & Send");
         send.onclick = (e) => busy(e.target, async () => {
           const go = async () => { const r = await act(d.status === "failed" ? "retry" : "approve", { text: ta.value }); toast(r.message || r.status); loadDrafts(); };
@@ -290,7 +312,7 @@
       } else {
         const cp = el("button", "btn", "📋 Copy message"); cp.onclick = () => copy(ta.value); btns.append(cp);
       }
-      if (d.channel !== "telegram") {
+      if (d.channel !== "telegram" || !W.isAdmin) {
         const done = el("button", "btn secondary", "✔️ Mark as sent");
         done.onclick = (e) => busy(e.target, async () => { await act("mark_sent"); toast("Recorded as sent"); loadDrafts(); });
         btns.append(done);
@@ -348,6 +370,7 @@
 
   // ------------------------------------------------ settings
   async function loadSettingsPane(v) {
+    if (v === "me" && W.loadMe) W.loadMe();
     if (v === "account") W.loadAccount();
     if (v === "pro") {
       try {
@@ -365,7 +388,9 @@
         const s = await api("/api/agent/settings");
         $("#a-limit").value = s.daily_limit; $("#a-gap").value = s.min_interval_sec; $("#a-auto").value = s.auto_search_hours;
         $("#a-queries").value = s.queries; $("#a-channels").value = s.tg_channels;
-        const p = s.providers;
+        const p = s.providers || {};
+        $("#a-auto").disabled = !s.is_admin;
+        if (!s.is_admin) { $("#a-prov").textContent = "Auto search, Telegram channel reading and sending from a Telegram account are admin-only. Your drafts are sent by you, manually."; return; }
         $("#a-prov").textContent = `Google: ${p.google || "not set"} · X: ${p.x || "not set"} · Messages: ${p.llm_draft || "templates"} · Scoring: ${p.llm_qualify || "rules"}`;
       } catch (e) { err(e); }
     }
