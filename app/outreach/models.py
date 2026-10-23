@@ -1,4 +1,4 @@
-"""Database models for the AI job discovery + outreach agent (owner only)."""
+"""Database models for the AI job discovery + outreach agent (every row is keyed by owner_id)."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -42,6 +42,23 @@ DEFAULT_PROFILE = {
         "I'd be happy to share my experience and discuss how I could contribute to your team.\n\n"
         "Thank you for your time."),
 }
+
+def generic_profile(first_name: str = "") -> dict:
+    """Starting profile for normal users: no invented facts, they fill in their own."""
+    name = (first_name or "").strip()[:120]
+    intro = f"Hi, I'm {name}, " if name else "Hi, I'm "
+    return {
+        "name": name, "location": "", "headline": "", "experience": "", "skills": "",
+        "preferred_roles": "moderator,community,support,social",
+        "links": "",
+        "template": (
+            intro + "interested in contributing to Web3 communities.\n\n"
+            "I wanted to ask if your project currently has any paid opportunities for a Moderator, "
+            "Community Manager, or Customer Support contributor.\n\n"
+            "I'd be happy to share my experience and discuss how I could contribute to your team.\n\n"
+            "Thank you for your time."),
+    }
+
 
 DEFAULT_QUERIES = [
     "Web3 moderator hiring",
