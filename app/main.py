@@ -183,6 +183,7 @@ async def setup_bot(bot: Bot):
 app = FastAPI(title="Web3 Job Finder", lifespan=lifespan, docs_url=None, redoc_url=None)
 app.include_router(agent_router)
 app.include_router(admin_router)
+from .presence_api import router as presence_router; app.include_router(presence_router)  # noqa: E402,E702
 
 
 def _client_ip(request: Request) -> str:
