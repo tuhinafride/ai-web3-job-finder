@@ -67,7 +67,7 @@ def configured() -> dict:
     st = get_settings()
     return {
         "google": "serper" if st.serper_api_key else "brave" if st.brave_api_key else "",
-        "x": "grok" if st.xai_api_key else "x_api" if st.x_bearer_token else "twitterapi_io" if st.twitterapi_io_key else "",
+        "x": "chatgpt" if st.openai_api_key else "grok" if st.xai_api_key else "x_api" if st.x_bearer_token else "twitterapi_io" if st.twitterapi_io_key else "",
         "llm": llm.enabled("qualify") or llm.enabled("draft"),
         "llm_draft": llm.provider_name("draft"),
         "llm_qualify": llm.provider_name("qualify"),
@@ -131,9 +131,11 @@ X_ROLE_QUERY = ('(hiring OR "we are hiring" OR "looking for" OR "we\'re looking"
                 '(web3 OR crypto OR defi OR nft OR blockchain) -is:retweet lang:en')
 
 
-async def x_search(query: str = "", max_results: int = 25) -> list[RawLead]:
+async def x_search(query: str = "", max_results: int = 20) -> list[RawLead]:
     st = get_settings()
     q = query or X_ROLE_QUERY
+    if st.openai_api_key:
+        return await grok_x_search(query, max_results, provider="chatgpt")
     if st.xai_api_key:
         return await grok_x_search(query, max_results)
     async with httpx.AsyncClient(timeout=25) as c:
@@ -214,8 +216,10 @@ def _grok_text(data: dict) -> str:
     return "\n".join(out)
 
 
-async def grok_x_search(query: str = "", max_results: int = 25, days: int = 14) -> list[RawLead]:
-    """X search through xAI Grok's x_search tool. Keeps only posts Grok's tool really cited."""
+async def grok_x_search(query: str = "", max_results: int = 20, days: int = 14,
+                        provider: str = "grok") -> list[RawLead]:
+    """X search through Grok's x_search tool, or ChatGPT's web_search limited to x.com.
+    Keeps only posts the search tool really cited."""
     st = get_settings()
     today = datetime.utcnow().date()
     prompt = GROK_X_PROMPT.format(days=days, n=max_results,
@@ -228,11 +232,17 @@ async def grok_x_search(query: str = "", max_results: int = 25, days: int = 14) 
                    "to_date": (today + timedelta(days=1)).isoformat()}],
         "max_turns": 3,
     }
+    if provider == "chatgpt":
+        body = {"model": st.openai_model,
+                "input": [{"role": "user", "content": prompt.replace("Use X search", "Use web search on x.com")}],
+                "tools": [{"type": "web_search", "filters": {"allowed_domains": ["x.com", "twitter.com"]}}]}
+        url, key = "https://api.openai.com/v1/responses", st.openai_api_key
+    else:
+        url, key = "https://api.x.ai/v1/responses", st.xai_api_key
     async with httpx.AsyncClient(timeout=180) as c:
-        r = await c.post("https://api.x.ai/v1/responses", json=body,
-                         headers={"Authorization": f"Bearer {st.xai_api_key}"})
+        r = await c.post(url, json=body, headers={"Authorization": f"Bearer {key}"})
     if r.status_code != 200:
-        raise ProviderError(f"Grok HTTP {r.status_code}")
+        raise ProviderError(f"{provider} HTTP {r.status_code}")
     data = r.json()
     cited = _grok_citations(data)
     m = re.search(r"\{.*\}", _grok_text(data), re.S)
