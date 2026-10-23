@@ -1,0 +1,25 @@
+# Keeps the Render free web service awake so the automation scheduler keeps running.
+# Render's free plan sleeps after ~15 minutes without inbound traffic; this pings /health every 10 minutes.
+# GitHub may delay or skip scheduled runs and disables them after 60 days without repo activity, so an external
+# pinger (e.g. cron-job.org, every 10 min) is the reliable fallback. See README → "Keep the free service awake".
+name: keepalive
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ping /health
+        run: |
+          for i in 1 2 3; do
+            if curl -fsS --max-time 60 https://web3-job-finder.onrender.com/health; then echo; exit 0; fi
+            echo "attempt $i failed, retrying in 20s"; sleep 20
+          done
+          echo "health check failed (service may be waking up or down)"; exit 1
