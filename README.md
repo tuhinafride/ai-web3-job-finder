@@ -72,10 +72,14 @@ app/
   services.py       search, matching, saving, refresh, alerts
   webapp_auth.py    Telegram Mini App initData validation
   main.py           FastAPI app, webhook, Mini App API, scheduler
+  outreach/         AI job agent: search.py (providers), llm.py (Gemini/OpenAI), agent.py, api.py,
+                    automation.py (full automation scheduler + bot notifications)
+  bot/automation_handlers.py   /auto_* commands and lead/automation buttons (admin-only)
   bot/handlers.py   all bot commands and admin tools
   bot/format.py     message and channel-post formatting
   sources/providers.py   job feed connectors
-webapp/             Mini App (index.html, styles.css, app.js)
+webapp/             Mini App (index.html, styles.css, app.js, agent.js, automation.js, admin.js, profile.js)
+.github/workflows/keepalive.yml   pings /health every 10 min so Render's free plan doesn't sleep
 tests/              automated tests
 render.yaml         Render blueprint (web service + PostgreSQL)
 requirements.txt    dependencies
@@ -156,7 +160,8 @@ place it lives. Never put it in `render.yaml`, the code, or a commit.
 
 ## 6. Good to know about Render's free plan
 - A free web service **sleeps after ~15 minutes** without traffic. A Telegram message wakes it, but the
-  first reply can take up to a minute, and hourly job fetching pauses while it sleeps. Alerts still go
+  first reply can take up to a minute, and hourly job fetching and full automation pause while it sleeps.
+  See **Keep the free service awake** at the end of this file. Alerts still go
   out whenever it's awake. The **Starter** plan (about $7/month) keeps it always on.
 - Render's **free PostgreSQL expires after 30 days**. Upgrade it, or use a free external Postgres
   (e.g. Neon) by pasting its connection string into `DATABASE_URL`.
@@ -219,10 +224,31 @@ halts searching and sending immediately. AI drafts that add numbers/claims not i
 
 | Env var | What for | Where to get it |
 |---|---|---|
-| `SERPER_API_KEY` *or* `BRAVE_API_KEY` | Google-style web search | serper.dev (2,500 free queries) / brave.com/search/api ($5 free monthly credit) |
-| `X_BEARER_TOKEN` *or* `TWITTERAPI_IO_KEY` | X post search | developer.x.com (pay per use) / twitterapi.io (third party, small free credit) |
-| `LLM_API_KEY` (+ optional `LLM_BASE_URL`, `LLM_MODEL`) | AI qualification and drafts | Any OpenAI-compatible API. Default is Google Gemini (aistudio.google.com/apikey) |
+| `LLM_API_KEY` (**recommended, free**) | One Google Gemini key does AI scoring, message drafts, **Google search** (Gemini "Grounding with Google Search") and **X hiring-post search** | aistudio.google.com/apikey → Create API key. Default base `https://generativelanguage.googleapis.com/v1beta/openai`, model `gemini-2.5-flash` |
+| `SERPER_API_KEY` *or* `BRAVE_API_KEY` (optional) | Paid Google-style search, tried before Gemini | serper.dev / brave.com/search/api |
+| `X_BEARER_TOKEN` *or* `TWITTERAPI_IO_KEY` (optional) | X post search, tried before Gemini | developer.x.com / twitterapi.io |
+| `OPENAI_API_KEY` (optional) | ChatGPT, only used when `LLM_API_KEY` is empty or as a fallback when Gemini fails | platform.openai.com |
 | Telegram account | channel reading + sending | Mini App → Settings → Telegram account (see section above) |
+
+**Search order (first that works wins, failures are logged and skipped with back-off, results are never invented):**
+- Google: Serper → Brave → Gemini grounding (one grounded call per run for all search phrases).
+- X: X API → TwitterAPI.io → Gemini grounding on `site:x.com` → ChatGPT web search.
+- Telegram: public channels you list, read through your connected personal account.
+
+**How Gemini grounding stays honest:** the app calls `models/{model}:generateContent` with the `google_search` tool and
+keeps a result **only if it is one of the sources Google returned** in `groundingMetadata.groundingChunks`. Those are
+`vertexaisearch.cloud.google.com` redirect links; each is resolved to the real page, which is then downloaded and read
+(that's what "source checked" means). Anything the model mentions that isn't a grounding source is dropped. For X, only
+grounded `x.com/twitter.com/<user>/status/<id>` links are kept, and the real post text is fetched from X's public
+oEmbed endpoint when available.
+
+**Free-tier guards (Gemini):** every lead is scored by rules first and only the top `LLM_MAX_CALLS_PER_RUN` (default 5)
+new leads per run go to the AI; at most `LLM_DAILY_CALL_CAP` (200) AI calls and `GEMINI_GROUNDING_DAILY_CAP` (150)
+grounded searches per UTC day; calls are spaced `LLM_MIN_INTERVAL_SEC` (4 s) apart; HTTP 429 is retried with the
+delay Google asks for, then the provider cools down and rules are used. An invalid key (Google answers HTTP 400
+"API key not valid") is reported as such and not retried for 30 minutes. These counters live in memory and reset on
+restart. If `gemini-2.5-flash` isn't available to a new key, the app retries once with `LLM_FALLBACK_MODEL`
+(`gemini-flash-latest`); you can also set `LLM_MODEL` yourself.
 
 Google's own Custom Search JSON API is closed to new customers, so it isn't used. X DMs aren't automated:
 the app copies your message and opens the profile so you send it yourself.
@@ -250,3 +276,45 @@ from normal users.
   (UTC). Admins are unlimited. API calls are rate limited per user and per IP (in memory).
 - **Database upgrade**: on startup the app adds the new columns to the existing `users` table with
   `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` (Postgres) and creates the new tables. Nothing is dropped.
+
+## Full automation mode (admins)
+
+Home → **Full automation** card (or the bot commands `/auto_start`, `/auto_pause`, `/auto_stop`, `/auto_status`).
+
+- **States:** Running (searches on schedule) · Paused (kept on, no searches, no reminders) · Stopped (off).
+  Saved in the database, so after a restart or redeploy it resumes by itself (a run cut off by the restart is marked
+  "interrupted" and the next one starts on time).
+- **Scheduler:** a background loop inside the web service checks every 15 s. It does not need the Mini App to be open.
+  Opening the Mini App while automation is running starts a search right away, unless one is running or one started
+  less than 5 minutes ago.
+- **Settings:** search every N minutes (default 15, min 5), status reminder every N minutes (default 1, min 1),
+  sources (Google, X, Telegram), minimum match % for notifications (default 50).
+- **Each run:** searches the configured providers, dedupes against every lead you already have (URL + near-duplicate
+  text), scores and stores new leads, then **the bot** (not your personal account) messages you the new leads with
+  match ≥ your setting and scam risk not high: title, project, pay, source link, scam flags and buttons
+  **Save / Generate draft / Skip**. More than 5 new leads arrive as one digest. A lead is never announced twice
+  (database unique key per admin + lead).
+- **Status reminder:** while running, the bot keeps one status message (pinned) up to date every reminder interval by
+  editing it (no new message each minute). If that message was deleted, a new one is sent and remembered. Buttons:
+  Start / Pause / Stop / Run now.
+- **Telegram limits:** ≤ 1 bot message per second per chat, `RetryAfter` honoured. If you never pressed **Start** in
+  the bot (or blocked it), Telegram refuses the message: it's shown as a notification error in the card and the leads
+  are announced once you start the bot.
+- **Safety:** messages to recruiters are **never** sent automatically. "Generate draft" only creates a draft; sending
+  still needs your approval in Outreach, with all the existing limits.
+- **Logs:** Home → Full automation → Automation logs (runs, provider errors, notification problems).
+
+## Keep the free service awake (Render)
+
+Render's free web service sleeps after about 15 minutes without incoming traffic, and a sleeping service runs no
+scheduler. Two options:
+
+1. **GitHub Actions** (included): `.github/workflows/keepalive.yml` calls
+   `https://web3-job-finder.onrender.com/health` every 10 minutes. GitHub can delay scheduled runs and turns them off
+   after 60 days without repository activity, so treat it as best-effort. If your service URL is different, edit it
+   in the workflow file.
+2. **External pinger (most reliable):** create a free job at **cron-job.org** (or UptimeRobot) that requests
+   `https://web3-job-finder.onrender.com/health` every 10 minutes.
+
+Keeping a free service awake all month uses about 744 instance hours, within Render's 750 free hours for one service.
+The paid Starter plan never sleeps.
