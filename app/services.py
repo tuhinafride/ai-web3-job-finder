@@ -20,7 +20,7 @@ async def get_or_create_user(s: AsyncSession, tg_id: int, username: str | None =
                              first_name: str | None = None) -> User:
     user = await s.get(User, tg_id)
     if user is None:
-        user = User(tg_id=tg_id, username=username, first_name=first_name)
+        user = User(tg_id=tg_id, username=username, first_name=first_name, referral_source="bot")
         s.add(user)
         await s.flush()
     else:
@@ -192,7 +192,8 @@ async def pending_alerts(s: AsyncSession, new_ids: list[int], per_user: int = 5)
     """For each opted-in user, the new jobs that match their profile and were not sent before."""
     if not new_ids:
         return {}
-    users = list((await s.execute(select(User).where(User.alerts_enabled.is_(True)))).scalars())
+    users = list((await s.execute(select(User).where(
+        User.alerts_enabled.is_(True), or_(User.status.is_(None), User.status != "suspended")))).scalars())
     jobs = list((await s.execute(select(Job).where(Job.id.in_(new_ids)))).scalars())
     out: dict[int, list[Job]] = {}
     for u in users:
