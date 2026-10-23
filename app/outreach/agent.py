@@ -67,7 +67,7 @@ async def add_log(owner_id: int, kind: str, message: str, level: str = "info", s
 
 # ------------------------------------------------------------------ storing leads
 async def store_lead(s, owner_id: int, raw: S.RawLead, preferred: list[str], use_llm: bool = True,
-                     min_relevance: int = 15) -> tuple[Lead | None, str]:
+                     min_relevance: int = 15, llm_budget: dict | None = None) -> tuple[Lead | None, str]:
     """Returns (lead, outcome) where outcome is new | duplicate | irrelevant."""
     uid = Q.lead_uid(raw.url, raw.text)
     fp = Q.text_fingerprint(raw.text)
@@ -78,7 +78,9 @@ async def store_lead(s, owner_id: int, raw: S.RawLead, preferred: list[str], use
     q = Q.rule_qualify(raw.text, raw.title, raw.project, raw.posted_at, raw.author_x, raw.author_tg, preferred)
     if not (q.is_hiring or q.role != "other") or (not q.web3 and raw.source != "board"):
         return None, "irrelevant"
-    if use_llm:
+    if use_llm and (llm_budget is None or llm_budget.get("left", 0) > 0):
+        if llm_budget is not None:
+            llm_budget["left"] -= 1
         q = await Q.qualify(raw.text, raw.title, raw.project, raw.posted_at, raw.author_x, raw.author_tg, preferred)
         if q.ai_used and not q.is_hiring:
             return None, "irrelevant"
@@ -128,33 +130,35 @@ async def import_board_job(s, owner_id: int, job: Job, preferred: list[str], use
 
 
 # ------------------------------------------------------------------ discovery run
-async def run_discovery(owner_id: int, sources: list[str], custom_query: str = "") -> dict:
-    summary = {"new": 0, "duplicate": 0, "irrelevant": 0, "errors": [], "by_source": {}}
+def queries_of(state: AgentState) -> list[str]:
+    """Saved search phrases, or the defaults when the owner cleared them all."""
+    return csv(state.queries)[:8] or list(DEFAULT_QUERIES)
+
+
+async def run_discovery(owner_id: int, sources: list[str], custom_query: str = "", trigger: str = "manual") -> dict:
+    from . import llm
+    from ..config import get_settings
+    summary = {"new": 0, "duplicate": 0, "irrelevant": 0, "errors": [], "by_source": {}, "new_ids": [],
+               "ai_calls": 0}
     async with SessionLocal() as s:
         state = await get_state(s, owner_id)
         if state.stopped:
             raise RuntimeError("Agent is stopped. Resume it first.")
         prof = await get_profile(s, owner_id)
         preferred = csv(prof.preferred_roles)
-        queries = [custom_query] if custom_query else csv(state.queries)[:8]
+        queries = [custom_query] if custom_query else queries_of(state)
         channels = csv(state.tg_channels)
         await s.commit()
 
     raws: list[S.RawLead] = []
     if "google" in sources:
-        for q in queries:
-            try:
-                found = await S.web_search(q)
-                summary["by_source"]["google"] = summary["by_source"].get("google", 0) + len(found)
-                raws += found
-            except S.ProviderError as e:
-                summary["errors"].append(str(e))
-                break
+        found, errs = await S.google_search(queries)
+        summary["errors"] += errs
+        summary["by_source"]["google"] = len(found)
+        raws += found
         # read the actual pages (contacts, real text) - limited to keep runs fast
-        google = [r for r in raws if r.source == "google"]
-        seen_urls = set()
-        uniq = [r for r in google if not (r.url in seen_urls or seen_urls.add(r.url))]
-        await asyncio.gather(*(S.enrich_page(r) for r in uniq[:25]))
+        todo = [r for r in found if not r.checked][:25]
+        await asyncio.gather(*(S.enrich_page(r) for r in todo))
     if "x" in sources:
         try:
             xq = custom_query and f"({custom_query}) -is:retweet lang:en"
@@ -168,15 +172,30 @@ async def run_discovery(owner_id: int, sources: list[str], custom_query: str = "
     elif "telegram" in sources:
         if not channels:
             summary["errors"].append("No public Telegram channels listed in Agent settings.")
+        elif not S.backoff.allowed("telegram"):
+            summary["errors"].append(f"telegram: skipped (backing off {S.backoff.wait_left('telegram')}s after errors)")
         else:
             try:
                 found = await S.telegram_channels(owner_id, channels)
                 summary["by_source"]["telegram"] = len(found)
                 raws += found
+                S.backoff.ok("telegram")
             except tg.SendBlocked as e:
+                S.backoff.fail("telegram", e.message)
                 summary["errors"].append(e.message)
             except Exception as e:
+                S.backoff.fail("telegram", type(e).__name__)
                 summary["errors"].append(f"Telegram: {type(e).__name__}")
+
+    # Free-tier friendly: rank by the deterministic rules first, only the top N go to the AI.
+    def rule_score(r: S.RawLead) -> int:
+        try:
+            return Q.rule_qualify(r.text, r.title, r.project, r.posted_at, r.author_x, r.author_tg, preferred).relevance
+        except Exception:
+            return 0
+    raws.sort(key=rule_score, reverse=True)
+    budget = {"left": max(0, min(get_settings().llm_max_calls_per_run, llm.budget_left()))}
+    start_budget = budget["left"]
 
     async with SessionLocal() as s:
         for raw in raws:
@@ -184,16 +203,20 @@ async def run_discovery(owner_id: int, sources: list[str], custom_query: str = "
                 summary["errors"].append("Stopped by you.")
                 break
             try:
-                _, outcome = await store_lead(s, owner_id, raw, preferred)
+                lead, outcome = await store_lead(s, owner_id, raw, preferred, llm_budget=budget)
                 summary[outcome] += 1
                 await s.commit()
+                if lead is not None:
+                    summary["new_ids"].append(lead.id)
             except Exception as e:
                 await s.rollback()
                 log.warning("store lead failed: %s", type(e).__name__)
+        summary["ai_calls"] = start_budget - budget["left"]
         st = await get_state(s, owner_id)
         st.last_search_at = utcnow()
-        await add_log(owner_id, "search",
-                      f"Search ({', '.join(sources)}): {summary['new']} new, {summary['duplicate']} duplicates, "
+        label = "Auto search" if trigger != "manual" else "Search"
+        await add_log(owner_id, "auto" if trigger != "manual" else "search",
+                      f"{label} ({', '.join(sources)}): {summary['new']} new, {summary['duplicate']} duplicates, "
                       f"{summary['irrelevant']} not relevant" + (f"; issues: {'; '.join(summary['errors'])}" if summary["errors"] else ""),
                       "warn" if summary["errors"] else "info", s)
         await s.commit()
