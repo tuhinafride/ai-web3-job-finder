@@ -26,6 +26,9 @@ from .classify import CATEGORY_LABELS
 from .config import get_settings
 from .db import Job, SessionLocal, init_db
 from . import userclient as uc
+from .outreach import models as _outreach_models  # noqa: F401  (registers tables)
+from .outreach import agent as outreach_agent
+from .outreach.api import router as agent_router
 from .webapp_auth import telegram_user
 
 
@@ -78,6 +81,28 @@ async def refresh_loop():
         await asyncio.sleep(max(15, settings.fetch_interval_minutes) * 60)
 
 
+async def outreach_loop():
+    """Sends queued approved drafts (respecting limits) and runs optional auto-searches."""
+    from sqlalchemy import select
+    from datetime import timedelta
+    from .db import utcnow
+    await asyncio.sleep(10)
+    while True:
+        try:
+            await outreach_agent.sender_tick()
+            async with SessionLocal() as s:
+                states = (await s.scalars(select(_outreach_models.AgentState).where(
+                    _outreach_models.AgentState.auto_search_hours > 0,
+                    _outreach_models.AgentState.stopped.is_(False)))).all()
+            for st in states:
+                due = not st.last_search_at or utcnow() - st.last_search_at >= timedelta(hours=st.auto_search_hours)
+                if due and st.owner_id in settings.admin_ids:
+                    outreach_agent.start_discovery(st.owner_id, ["google", "x", "telegram"])
+        except Exception:
+            log.exception("outreach loop error")
+        await asyncio.sleep(30)
+
+
 @contextlib.asynccontextmanager
 async def lifespan(_: FastAPI):
     global bot
@@ -92,6 +117,7 @@ async def lifespan(_: FastAPI):
         log.warning("BOT_TOKEN not set: API/Mini App run, Telegram bot disabled")
     if not settings.disable_scheduler:
         _tasks.append(asyncio.create_task(refresh_loop()))
+        _tasks.append(asyncio.create_task(outreach_loop()))
     yield
     for t in _tasks:
         t.cancel()
@@ -129,6 +155,7 @@ async def setup_bot(bot: Bot):
 
 
 app = FastAPI(title="Web3 Job Finder", lifespan=lifespan, docs_url=None, redoc_url=None)
+app.include_router(agent_router)
 
 
 # ------------------------------------------------------------------ webhook
