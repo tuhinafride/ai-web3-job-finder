@@ -29,6 +29,7 @@
     if (res.status === 401) { showGate("mismatch"); throw new Error("auth"); }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
+      if (res.status === 403 && body.detail === "account_suspended") { showGate("suspended"); throw new Error("auth"); }
       const detail = Array.isArray(body.detail) ? (body.detail[0] && body.detail[0].msg) : body.detail;
       const err = new Error(detail || res.statusText);
       err.code = body.code || ""; err.status = res.status;
@@ -42,6 +43,11 @@
     let bot = "";
     try { bot = (await (await fetch("/api/botinfo")).json()).username || ""; } catch (_) {}
     const name = bot ? "@" + bot : "the bot";
+    if (reason === "suspended") {
+      $("#gate").querySelector("h2").textContent = "Access suspended";
+      $("#gate-msg").textContent = "Your access to this app has been suspended by an admin. Contact the bot admin if you think this is a mistake.";
+      return;
+    }
     $("#gate-msg").textContent = reason === "mismatch"
       ? `This app belongs to ${name}. You opened it from a different bot or an old button. Open ${name}, send /start, then tap the Jobs App button.`
       : `Open ${name} in Telegram, send /start, then tap the Jobs App button (a plain link can't sign you in).`;
@@ -354,7 +360,7 @@
       currentView = t.dataset.view;
       document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
       $(`#view-${currentView}`).classList.add("active");
-      if (currentView === "jobs") { state.mode = t.dataset.mode; renderCategoryChips(); loadJobs(); }
+      if (currentView === "jobs") { state.mode = state.forme ? "forme" : (t.dataset.mode || "all"); renderCategoryChips(); loadJobs(); }
       if (currentView === "saved") loadSaved();
       if (currentView === "profile") renderProfile();
       if (currentView === "account") loadAccount();
@@ -362,7 +368,11 @@
     };
   });
   document.querySelectorAll(".toggle").forEach((b) => {
-    b.onclick = () => { const f = b.dataset.flag; state[f] = !state[f]; b.classList.toggle("on", state[f]); loadJobs(); };
+    b.onclick = () => {
+      const f = b.dataset.flag; state[f] = !state[f]; b.classList.toggle("on", state[f]);
+      if (f === "forme") { state.mode = state.forme ? "forme" : "all"; renderCategoryChips(); }
+      loadJobs();
+    };
   });
   let debounce;
   $("#q").addEventListener("input", (e) => {
@@ -379,12 +389,17 @@
   (async () => {
     if (!initData) { showGate("nolink"); return; }
     try {
+      // /api/me first: it registers the user (and any invite in start_param) on the server
+      const me = await api("/api/me");
       const [meta, profile] = await Promise.all([api("/api/meta"), api("/api/profile")]);
       state.categories = meta.categories;
       state.profile = profile;
-      state.isAdmin = !!meta.is_admin; state.userId = meta.user_id;
-      if (state.isAdmin) $("#tab-account").classList.remove("hidden");
-      if (state.isAdmin && window.W3 && W3.initOwner) W3.initOwner();
+      state.me = me;
+      // admin UI is only revealed when the server (not the client) says so; every admin API re-checks
+      state.isAdmin = !!me.is_admin; state.userId = me.id;
+      document.body.classList.toggle("is-admin", state.isAdmin);
+      if (window.W3 && W3.initAgent) W3.initAgent(state.isAdmin);
+      if (state.isAdmin) { $("#tab-admin").classList.remove("hidden"); if (W3.initAdmin) W3.initAdmin(); }
       $("#stat").textContent = `${meta.stats.total} live Web3 jobs from company boards & job sites`;
       renderCategoryChips();
       loadJobs();
