@@ -57,6 +57,58 @@
         <span class="badge agg">🔎 Third-party</span> listings should be checked on the company's own site.
       </div>
     </section>
+    <!-- PERSONAL TELEGRAM ACCOUNT (owner only) -->
+    <section id="view-account" class="view">
+      <h2 class="section-title">Your Telegram account</h2>
+      <div id="acct-status" class="card status-card">
+        <div class="status-row"><span id="acct-dot" class="dot"></span><b id="acct-title">Checking…</b></div>
+        <p id="acct-sub" class="muted small"></p>
+      </div>
+
+      <div id="acct-locked" class="card hidden">
+        <b>Owner only.</b>
+        <p class="muted">This screen signs in to a personal Telegram account, so it's limited to the owner.
+        Your Telegram ID is <code id="my-id">…</code>. Add it to <code>ADMIN_IDS</code> on the server to unlock it.</p>
+      </div>
+
+      <div id="acct-api" class="card hidden">
+        <b>Step 1 · Your API keys</b>
+        <p class="muted small">Get them at my.telegram.org → API development tools. They're stored encrypted.</p>
+        <input id="api-id" type="text" inputmode="numeric" placeholder="api_id (numbers)" autocomplete="off" />
+        <input id="api-hash" type="password" placeholder="api_hash (32 characters)" autocomplete="off" />
+        <button id="api-save" class="btn">Save API keys</button>
+        <button id="api-help" class="btn ghost">Open my.telegram.org</button>
+      </div>
+
+      <div id="acct-login" class="card hidden">
+        <button id="login-start" class="btn big">🔐 Login with Telegram Account</button>
+        <div id="step-phone" class="hidden">
+          <label class="label" for="phone">Phone number (international format)</label>
+          <input id="phone" type="tel" placeholder="+8801XXXXXXXXX" autocomplete="tel" />
+          <button id="phone-send" class="btn">Send login code</button>
+        </div>
+        <div id="step-code" class="hidden">
+          <p class="muted small" id="code-hint">Telegram sent a code to your Telegram app.</p>
+          <input id="code" type="text" inputmode="numeric" placeholder="Login code" autocomplete="one-time-code" maxlength="8" />
+          <button id="code-send" class="btn">Verify code</button>
+        </div>
+        <div id="step-password" class="hidden">
+          <p class="muted small">Your account has two-step verification. Enter that password.</p>
+          <input id="password" type="password" placeholder="Two-step verification password" autocomplete="current-password" />
+          <button id="password-send" class="btn">Confirm password</button>
+        </div>
+        <button id="login-cancel" class="btn ghost hidden">Cancel</button>
+        <p class="muted small">🔒 Codes and passwords go straight to Telegram and are never stored or shown anywhere else.
+        Never share them in any chat.</p>
+      </div>
+
+      <div id="acct-connected" class="card hidden">
+        <button id="acct-verify" class="btn">Test connection</button>
+        <button id="acct-disconnect" class="btn danger">Disconnect account</button>
+        <p class="muted small">Disconnect logs this app out of your Telegram account and deletes the saved session.
+        You can also end it anytime in Telegram → Settings → Devices.</p>
+      </div>
+    </section>
   </main>
 
   <!-- detail sheet -->
@@ -72,6 +124,7 @@
     <button class="tab" data-view="jobs" data-mode="forme">🎯<span>For you</span></button>
     <button class="tab" data-view="saved">⭐<span>Saved</span></button>
     <button class="tab" data-view="profile">👤<span>Profile</span></button>
+    <button class="tab hidden" id="tab-account" data-view="account">🔐<span>Account</span></button>
   </nav>
 
   <div id="toast" class="toast hidden"></div>
