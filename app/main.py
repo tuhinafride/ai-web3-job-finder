@@ -25,6 +25,7 @@ from .bot.handlers import deliver_alerts, router
 from .classify import CATEGORY_LABELS
 from .config import get_settings
 from .db import Job, SessionLocal, init_db
+from . import userclient as uc
 from .webapp_auth import telegram_user
 
 
@@ -154,7 +155,7 @@ async def api_meta(user: dict = Depends(telegram_user)):
     async with SessionLocal() as s:
         st = await svc.stats(s)
     return {"categories": CATEGORY_LABELS, "stats": st,
-            "is_admin": user["id"] in settings.admin_ids}
+            "is_admin": user["id"] in settings.admin_ids, "user_id": user["id"]}
 
 
 @app.get("/api/jobs")
@@ -248,6 +249,98 @@ async def api_profile_put(body: ProfileIn, user: dict = Depends(telegram_user)):
         u.remote_only, u.alerts_enabled = body.remote_only, body.alerts_enabled
         await s.commit()
         return svc.user_profile_dict(u)
+
+
+# ------------------------------------------------------------------ personal account (owner only)
+async def owner_user(user: dict = Depends(telegram_user)) -> dict:
+    if user["id"] not in settings.admin_ids:
+        raise HTTPException(status_code=403, detail=f"owner_only:{user['id']}")
+    return user
+
+
+def _login_error(e: "uc.LoginError"):
+    return JSONResponse({"detail": e.message, "code": e.code}, status_code=e.status)
+
+
+class ApiCredsIn(BaseModel):
+    api_id: str = Field(max_length=16)
+    api_hash: str = Field(max_length=64)
+
+
+class PhoneIn(BaseModel):
+    phone: str = Field(max_length=32)
+
+
+class CodeIn(BaseModel):
+    code: str = Field(max_length=16)
+
+
+class PasswordIn(BaseModel):
+    password: str = Field(max_length=256)
+
+
+class DisconnectIn(BaseModel):
+    forget_api: bool = False
+
+
+@app.get("/api/account/status")
+async def account_status(user: dict = Depends(owner_user)):
+    return await uc.status(user["id"])
+
+
+@app.post("/api/account/api-credentials")
+async def account_api_creds(body: ApiCredsIn, user: dict = Depends(owner_user)):
+    try:
+        await uc.save_api_credentials(user["id"], body.api_id, body.api_hash)
+    except uc.LoginError as e:
+        return _login_error(e)
+    return await uc.status(user["id"])
+
+
+@app.post("/api/account/send-code")
+async def account_send_code(body: PhoneIn, user: dict = Depends(owner_user)):
+    try:
+        return await uc.send_code(user["id"], body.phone)
+    except uc.LoginError as e:
+        return _login_error(e)
+
+
+@app.post("/api/account/code")
+async def account_code(body: CodeIn, user: dict = Depends(owner_user)):
+    try:
+        return await uc.submit_code(user["id"], body.code)
+    except uc.LoginError as e:
+        return _login_error(e)
+
+
+@app.post("/api/account/password")
+async def account_password(body: PasswordIn, user: dict = Depends(owner_user)):
+    try:
+        return await uc.submit_password(user["id"], body.password)
+    except uc.LoginError as e:
+        return _login_error(e)
+
+
+@app.post("/api/account/cancel")
+async def account_cancel(user: dict = Depends(owner_user)):
+    await uc.cancel(user["id"])
+    return await uc.status(user["id"])
+
+
+@app.post("/api/account/verify")
+async def account_verify(user: dict = Depends(owner_user)):
+    try:
+        return await uc.verify_live(user["id"])
+    except uc.LoginError as e:
+        return _login_error(e)
+
+
+@app.post("/api/account/disconnect")
+async def account_disconnect(body: DisconnectIn, user: dict = Depends(owner_user)):
+    try:
+        return await uc.disconnect(user["id"], body.forget_api)
+    except uc.LoginError as e:
+        return _login_error(e)
 
 
 @app.exception_handler(Exception)
