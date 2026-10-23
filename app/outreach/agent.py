@@ -13,7 +13,7 @@ from . import drafts as drafting
 from . import qualify as Q
 from . import search as S
 from . import tg
-from .models import (DEFAULT_PROFILE, DEFAULT_QUERIES, AgentState, ContactedRecipient, Contact, Draft,
+from .models import (DEFAULT_PROFILE, generic_profile, DEFAULT_QUERIES, AgentState, ContactedRecipient, Contact, Draft,
                      Lead, OutreachLog, OwnerProfile, ROLE_LABELS)
 
 log = logging.getLogger("outreach")
@@ -26,10 +26,21 @@ def csv(v: str) -> list[str]:
 
 
 # ------------------------------------------------------------------ profile / state / logs
+def is_admin(owner_id: int) -> bool:
+    from ..accounts import is_admin_id
+    return is_admin_id(owner_id)
+
+
 async def get_profile(s, owner_id: int) -> OwnerProfile:
     p = await s.get(OwnerProfile, owner_id)
     if p is None:
-        p = OwnerProfile(owner_id=owner_id, **DEFAULT_PROFILE)
+        if is_admin(owner_id):
+            defaults = dict(DEFAULT_PROFILE)       # the owner's own professional profile
+        else:                                   # never give other users the owner's facts
+            from ..db import User
+            u = await s.get(User, owner_id)
+            defaults = generic_profile((u.first_name if u else "") or "")
+        p = OwnerProfile(owner_id=owner_id, **defaults)
         s.add(p)
         await s.flush()
     return p
@@ -93,7 +104,7 @@ async def store_lead(s, owner_id: int, raw: S.RawLead, preferred: list[str], use
     return lead, "new"
 
 
-async def import_board_job(s, owner_id: int, job: Job, preferred: list[str]) -> Lead:
+async def import_board_job(s, owner_id: int, job: Job, preferred: list[str], use_llm: bool = True) -> Lead:
     uid = Q.lead_uid(job.url)
     lead = await s.scalar(select(Lead).where(Lead.owner_id == owner_id, Lead.uid == uid))
     if lead:
@@ -101,7 +112,7 @@ async def import_board_job(s, owner_id: int, job: Job, preferred: list[str]) -> 
     raw = S.RawLead("board", job.url, job.title, f"{job.title} at {job.company}\n{job.salary}\n{job.location}\n"
                     f"{job.requirements}\n{job.description[:4000]}", project=job.company, posted_at=job.posted_at,
                     checked=job.source_type == "company_ats")
-    lead, _ = await store_lead(s, owner_id, raw, preferred, use_llm=True, min_relevance=0)
+    lead, _ = await store_lead(s, owner_id, raw, preferred, use_llm=use_llm, min_relevance=0)
     if lead is None:  # board jobs are always kept when the owner asks
         q = Q.rule_qualify(raw.text, raw.title, raw.project, raw.posted_at, preferred_roles=preferred)
         lead = Lead(owner_id=owner_id, uid=uid, source="board", source_url=job.url, source_checked=raw.checked,
@@ -152,7 +163,9 @@ async def run_discovery(owner_id: int, sources: list[str], custom_query: str = "
             raws += found
         except S.ProviderError as e:
             summary["errors"].append(str(e))
-    if "telegram" in sources:
+    if "telegram" in sources and not is_admin(owner_id):
+        summary["errors"].append("Telegram channel search is admin-only.")
+    elif "telegram" in sources:
         if not channels:
             summary["errors"].append("No public Telegram channels listed in Agent settings.")
         else:
@@ -263,6 +276,8 @@ async def try_send(owner_id: int, draft_id: int) -> dict:
                 return {"ok": False, "code": "not_approved", "message": "Approve the draft first."}
             if d.channel != "telegram":
                 return {"ok": False, "code": "manual", "message": "Only Telegram drafts can be sent automatically."}
+            if not is_admin(owner_id):
+                return {"ok": False, "code": "admin_only", "message": "Sending from a Telegram account is admin-only."}
             if st.stopped:
                 return {"ok": False, "code": "stopped", "message": "Agent is stopped. Resume it to send."}
             if await already_contacted(s, owner_id, "telegram", d.recipient):
@@ -334,6 +349,8 @@ async def sender_tick():
         rows = (await s.execute(select(Draft.owner_id, func.min(Draft.id)).where(
             Draft.status == "approved", Draft.channel == "telegram").group_by(Draft.owner_id))).all()
     for owner_id, draft_id in rows:
+        if not is_admin(owner_id):
+            continue
         res = await try_send(owner_id, draft_id)
         if not res["ok"] and res["code"] not in ("interval", "daily_limit", "stopped"):
             log.info("queued send %s: %s", draft_id, res["code"])
