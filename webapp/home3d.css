@@ -1,0 +1,109 @@
+/* Animated Home layer (home3d.js). Everything is scoped to body.h3d-on (Home visible) or .h3d-* classes. */
+.h3d-bg { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 0; pointer-events: none; display: none; }
+body.h3d-on .h3d-bg { display: block; }
+body.h3d-on main { position: relative; z-index: 1; }
+body.h3d-on .top { background: linear-gradient(180deg, rgba(5,11,31,.92) 55%, rgba(5,11,31,0)); }
+
+/* readable glass over the animation: semi-opaque fills; real blur only on the few header panels */
+body.h3d-on #view-home .card, body.h3d-on #view-home .stat {
+  background: rgba(14,30,64,.76); border-color: rgba(80,150,255,.22); }
+body.h3d-on #view-home .log { background: rgba(5,11,31,.7); border-radius: 0 8px 8px 0; }
+body.h3d-on #view-home .small-title { text-shadow: 0 1px 6px #050b1f; }
+
+.h3d-root { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
+.h3d-head { display: flex; flex-direction: column; gap: 10px; margin: 2px 0 12px; }
+.h3d-glass { background: rgba(10,24,56,.55); border: 1px solid rgba(90,170,255,.28); border-radius: 16px;
+  -webkit-backdrop-filter: blur(10px) saturate(130%); backdrop-filter: blur(10px) saturate(130%);
+  box-shadow: 0 8px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.05); }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .h3d-glass { background: rgba(10,24,56,.86); } }
+
+/* ---- presence */
+.h3d-presence { padding: 14px 16px; text-align: center; position: relative; overflow: hidden; }
+.h3d-presence::before { content: ""; position: absolute; inset: -40% -10%; pointer-events: none;
+  background: radial-gradient(closest-side, rgba(52,211,153,.18), transparent 70%); animation: h3dbreath 3.2s ease-in-out infinite; }
+.h3d-prow { position: relative; display: flex; align-items: center; justify-content: center; gap: 10px; }
+.h3d-ptxt { font-size: clamp(19px, 6vw, 25px); font-weight: 800; letter-spacing: .01em; line-height: 1.2;
+  text-shadow: 0 0 18px rgba(52,211,153,.35), 0 1px 2px #000; }
+.h3d-emoji { font-size: .8em; }
+.h3d-num { color: #6ef3b8; font-variant-numeric: tabular-nums; display: inline-block; transition: transform .25s; }
+.h3d-presence.bump .h3d-num { transform: scale(1.06); }
+.h3d-plabel { color: #eafff6; }
+.h3d-live { position: relative; width: 12px; height: 12px; border-radius: 50%; background: #34d399; flex: none;
+  box-shadow: 0 0 10px #34d399, 0 0 22px rgba(52,211,153,.6); }
+.h3d-live::after { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 2px solid #34d399;
+  animation: h3dping 1.6s cubic-bezier(0,0,.2,1) infinite; }
+.h3d-psub { position: relative; margin-top: 6px; font-size: 11.5px; color: #a7f3d0; opacity: .85; }
+@keyframes h3dping { 0% { transform: scale(1); opacity: .9; } 100% { transform: scale(2.8); opacity: 0; } }
+@keyframes h3dbreath { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+
+/* ---- AI scanner */
+.h3d-scan { display: flex; gap: 14px; align-items: center; padding: 12px 14px; transition: box-shadow .3s; }
+.h3d-scan.kick { box-shadow: 0 0 0 2px rgba(34,211,238,.6), 0 8px 30px rgba(0,0,0,.35); }
+.h3d-radar { position: relative; width: 64px; height: 64px; flex: none; border-radius: 50%; overflow: hidden;
+  background: radial-gradient(circle, rgba(34,211,238,.18), rgba(5,11,31,.6) 70%); border: 1px solid rgba(34,211,238,.45); }
+.h3d-ring { position: absolute; border-radius: 50%; border: 1px solid rgba(34,211,238,.28); }
+.h3d-ring.r1 { inset: 12px; } .h3d-ring.r2 { inset: 24px; }
+.h3d-sweep { position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(34,211,238,0) 0deg, rgba(34,211,238,0) 280deg, rgba(34,211,238,.75) 360deg);
+  animation: h3dspin 2.4s linear infinite; }
+.h3d-blip { position: absolute; width: 5px; height: 5px; border-radius: 50%; background: #9ff6ff; box-shadow: 0 0 6px #22d3ee;
+  opacity: 0; animation: h3dblip 2.4s linear infinite; }
+.h3d-blip.b1 { left: 40px; top: 14px; animation-delay: .3s; } .h3d-blip.b2 { left: 16px; top: 38px; animation-delay: 1.2s; }
+.h3d-blip.b3 { left: 44px; top: 44px; animation-delay: 1.9s; }
+.h3d-scan[data-mode="running"] .h3d-sweep { animation-duration: 1.1s; }
+.h3d-scan[data-mode="running"] .h3d-blip { animation-duration: 1.1s; }
+.h3d-scan[data-mode="stopped"] .h3d-sweep, .h3d-scan[data-mode="stopped"] .h3d-blip { animation-play-state: paused; opacity: .25; }
+@keyframes h3dspin { to { transform: rotate(360deg); } }
+@keyframes h3dblip { 0%, 8% { opacity: 0; } 12% { opacity: 1; } 45% { opacity: 0; } 100% { opacity: 0; } }
+.h3d-sbody { flex: 1; min-width: 0; }
+.h3d-stop { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.h3d-stitle { font-size: 14px; }
+.h3d-tag { font-size: 10.5px; color: #7f95bf; text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
+.h3d-scan[data-mode="running"] .h3d-tag { color: #6ef3b8; }
+.h3d-phase { font-size: 17px; font-weight: 700; color: #b9f3ff; margin: 2px 0 6px; text-shadow: 0 0 12px rgba(34,211,238,.4); }
+.h3d-steps { display: flex; gap: 6px; flex-wrap: wrap; font-size: 11px; }
+.h3d-step { padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(90,170,255,.25); color: #8ea3cc; }
+.h3d-step.done { color: #a5c7ff; border-color: rgba(61,139,255,.45); }
+.h3d-step.on { color: #04122b; background: linear-gradient(90deg, #3d8bff, #22d3ee); border-color: transparent; font-weight: 700; }
+.h3d-bar { position: relative; height: 4px; margin-top: 9px; border-radius: 4px; background: rgba(61,139,255,.15); overflow: hidden; }
+.h3d-bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 33%; border-radius: 4px;
+  background: linear-gradient(90deg, #3d8bff, #22d3ee); transition: width .6s ease; }
+.h3d-bar::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.45), transparent); animation: h3dshim 1.6s ease-in-out infinite; }
+@keyframes h3dshim { to { transform: translateX(100%); } }
+
+/* ---- source buttons */
+.h3d-srcs { padding: 12px; }
+.h3d-srow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.h3d-src { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 13px 10px; border-radius: 13px;
+  font: inherit; font-weight: 800; font-size: 15px; color: #fff; cursor: pointer; border: 1px solid rgba(255,255,255,.12);
+  transition: transform .12s, box-shadow .2s; min-height: 48px; white-space: nowrap; }
+.h3d-src:active { transform: scale(.97); }
+.h3d-src.g { background: linear-gradient(135deg, #2f6df6, #3d8bff 55%, #22b8ee); box-shadow: 0 6px 22px rgba(61,139,255,.45); }
+.h3d-src.x { background: linear-gradient(135deg, #0b1020, #1b2440); box-shadow: 0 6px 22px rgba(0,0,0,.45), inset 0 0 0 1px rgba(34,211,238,.35); }
+.h3d-ico { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; background: rgba(255,255,255,.16); font-size: 14px; }
+.h3d-sfoot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.h3d-chip { font: inherit; font-size: 12.5px; padding: 6px 12px; border-radius: 999px; cursor: pointer;
+  background: rgba(5,11,31,.5); color: #8ea3cc; border: 1px dashed rgba(90,170,255,.4); }
+.h3d-chip.on { background: rgba(34,211,238,.16); color: #e8fbff; border: 1px solid #22d3ee; }
+.h3d-hint { font-size: 11px; color: #7f95bf; }
+
+/* ---- admin settings */
+.h3d-admin { padding: 10px 14px; }
+.h3d-admin summary { cursor: pointer; font-size: 13px; color: #a9bbe0; }
+.h3d-in { width: 100%; padding: 11px 12px; border-radius: 11px; border: 1px solid var(--line, #1f3566);
+  background: rgba(5,11,31,.75); color: var(--text, #e8eefc); font-size: 15px; outline: none; }
+.h3d-ainfo { margin-top: 8px; }
+
+@media (max-width: 380px) {
+  .h3d-src { font-size: 13.5px; gap: 6px; padding: 12px 6px; }
+  .h3d-ico { width: 20px; height: 20px; font-size: 12px; }
+}
+@media (min-width: 640px) {
+  .h3d-head { display: grid; grid-template-columns: 1fr 1fr; }
+  .h3d-presence, .h3d-admin { grid-column: 1 / -1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .h3d-live::after, .h3d-presence::before, .h3d-sweep, .h3d-blip, .h3d-bar::after { animation: none !important; }
+  .h3d-blip { opacity: .7; }
+}
