@@ -99,9 +99,16 @@ async def lifespan(_: FastAPI):
         await bot.session.close()
 
 
+BOT_INFO: dict = {"username": ""}
+
+
 async def setup_bot(bot: Bot):
     if settings.bot_mode not in ("webhook", "polling"):
         return
+    try:
+        BOT_INFO["username"] = (await bot.get_me()).username or ""
+    except Exception:
+        pass
     await bot.set_my_commands(COMMANDS)
     if settings.webapp_url.startswith("https://"):
         await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(
@@ -142,6 +149,12 @@ async def health():
     async with SessionLocal() as s:
         st = await svc.stats(s)
     return {"status": "ok", "jobs": st["total"]}
+
+
+@app.get("/api/botinfo")
+async def botinfo():
+    """Public: lets the Mini App tell the user which bot it belongs to."""
+    return {"username": BOT_INFO["username"]}
 
 
 @app.get("/")
