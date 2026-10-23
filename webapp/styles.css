@@ -153,3 +153,38 @@ textarea:focus { border-color: var(--accent); }
 .flag { color: #fca5a5; font-size: 13px; margin: 2px 0; }
 .kv { font-size: 13px; margin: 3px 0; } .kv b { color: var(--muted); font-weight: 500; }
 select.status { background: var(--bg2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
+
+/* multi-user: profile, invites, admin */
+body:not(.is-admin) .admin-only { display: none !important; }
+.setpane > .card + .card, #set-me .card { margin-top: 12px; }
+.reflink { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: var(--bg2); border: 1px dashed var(--line);
+  font-size: 13px; word-break: break-all; user-select: all; }
+.stats.three { grid-template-columns: repeat(3, 1fr); }
+.lb { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.lbrow { display: grid; grid-template-columns: 36px 1fr auto; gap: 8px; font-size: 13.5px; align-items: center;
+  padding: 6px 8px; border-radius: 8px; background: var(--bg2); }
+.lbrow .rank { color: var(--accent2); font-weight: 700; } .lbrow .val { color: var(--muted); font-size: 12px; }
+.lbrow .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chart { margin-top: 8px; }
+.svgchart { width: 100%; height: auto; display: block; }
+.svgchart .grid { stroke: var(--line); stroke-width: 1; }
+.svgchart .axis { fill: var(--muted); font-size: 9px; }
+.svgchart .ln { fill: none; stroke-width: 2; stroke-linejoin: round; }
+.svgchart .ln.a, .lg.a::before { stroke: var(--accent); background: var(--accent); }
+.svgchart .ln.n, .lg.n::before { stroke: var(--ok); background: var(--ok); }
+.svgchart .ln.r, .lg.r::before { stroke: var(--warn); background: var(--warn); }
+.legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; font-size: 11.5px; color: var(--muted); }
+.lg::before { content: ""; display: inline-block; width: 10px; height: 3px; margin-right: 5px; vertical-align: middle; }
+.admpane .card { margin-top: 12px; }
+.tablewrap { overflow-x: auto; margin-top: 8px; border: 1px solid var(--line); border-radius: 12px; }
+.utable { border-collapse: collapse; width: 100%; font-size: 12px; min-width: 760px; }
+.utable th, .utable td { padding: 7px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.utable th { color: var(--muted); font-weight: 600; background: var(--bg2); position: sticky; top: 0; }
+.utable td { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.pill.ok { color: var(--ok); }
+.btn.tiny { width: auto; margin: 0; padding: 5px 9px; font-size: 12px; border-radius: 8px; }
+.btn.small-btn { width: auto; margin: 0; padding: 8px 12px; font-size: 13px; }
+.pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pager .btn { width: auto; padding: 8px 14px; margin-top: 10px; }
+.btn:disabled { opacity: .5; }
+.tab span { white-space: nowrap; }
