@@ -88,8 +88,8 @@
     $("#stats").replaceChildren(...stats.map(([k, v]) => { const c = el("div", "stat"); c.append(el("b", null, String(v)), el("span", null, k)); return c; }));
     const p = d.providers, miss = [];
     if (!p.google) miss.push("Google search (add SERPER_API_KEY or BRAVE_API_KEY on Render)");
-    if (!p.x) miss.push("X search (add X_BEARER_TOKEN or TWITTERAPI_IO_KEY)");
-    if (!p.llm) miss.push("AI writing (add LLM_API_KEY). Rules and your template are used until then");
+    if (!p.x) miss.push("X search (add XAI_API_KEY for Grok)");
+    if (!p.llm) miss.push("AI writing (add OPENAI_API_KEY for ChatGPT). Rules and your template are used until then");
     if (!d.telegram_connected) miss.push("Telegram account (Settings → Telegram account) for channel search and sending");
     $("#prov-warn").classList.toggle("hidden", !miss.length);
     $("#prov-warn").replaceChildren(el("b", null, "Not set up yet: "), ...miss.map((m) => el("div", null, "• " + m)));
@@ -366,7 +366,7 @@
         $("#a-limit").value = s.daily_limit; $("#a-gap").value = s.min_interval_sec; $("#a-auto").value = s.auto_search_hours;
         $("#a-queries").value = s.queries; $("#a-channels").value = s.tg_channels;
         const p = s.providers;
-        $("#a-prov").textContent = `Google: ${p.google || "not set"} · X: ${p.x || "not set"} · AI: ${p.llm ? "on" : "off (templates)"}`;
+        $("#a-prov").textContent = `Google: ${p.google || "not set"} · X: ${p.x || "not set"} · Messages: ${p.llm_draft || "templates"} · Scoring: ${p.llm_qualify || "rules"}`;
       } catch (e) { err(e); }
     }
     if (v === "logs") {
