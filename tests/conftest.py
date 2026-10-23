@@ -15,4 +15,5 @@ os.environ.update({
     "BOT_USERNAME": "Test_jobs_bot",
     "RATE_LIMIT_IP_PER_MIN": "1000000",
     "RATE_LIMIT_USER_PER_MIN": "100000",
+    "LLM_MIN_INTERVAL_SEC": "0",
 })
