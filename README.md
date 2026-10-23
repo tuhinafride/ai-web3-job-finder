@@ -178,3 +178,25 @@ The Mini App needs a public https URL, so test it on Render (polling mode still 
 ## 8. Safety notice shown to users
 Real employers never ask you to pay a fee, buy tokens, connect a wallet, or share a seed phrase to
 apply. Third-party (🔎) listings should be confirmed on the company's official website.
+
+## Personal Telegram account login (owner only)
+
+This is a **user client** (Telegram's official MTProto API via Telethon), not the bot. It signs in to
+your own account with Telegram's normal login: phone number → login code → optional 2FA password.
+
+**Setup**
+1. Get your numeric Telegram ID: send `/myid` to the bot. Put it in `ADMIN_IDS` on Render
+   (Environment) and redeploy. Only IDs in `ADMIN_IDS` can open the Account tab.
+2. Get API keys: open https://my.telegram.org → log in with your phone → **API development tools** →
+   create an app (any title/short name, platform "Web"). Copy **api_id** and **api_hash**.
+3. In the Mini App → **🔐 Account** tab → enter api_id and api_hash (stored encrypted), or set
+   `TG_API_ID` / `TG_API_HASH` on Render instead.
+4. Tap **Login with Telegram Account**, enter your phone in international format, then the code
+   Telegram sends to your Telegram app, then your 2FA password if you use one.
+5. Tap **Test connection** to confirm the session works live.
+
+**Security**
+- Codes and passwords are typed only in the Mini App, sent over HTTPS straight to Telegram, never stored or logged.
+- The session is encrypted (Fernet) with `SESSION_ENC_KEY` (falls back to `WEBHOOK_SECRET`). Changing the key forces a new login.
+- **Disconnect** logs the session out at Telegram and deletes it. You can also end it in Telegram → Settings → Devices.
+- Never share a login code in any chat. Telegram blocks logins whose codes were forwarded in chats.
