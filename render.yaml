@@ -24,6 +24,12 @@ services:
         sync: false
       - key: WEBHOOK_SECRET
         generateValue: true
+      - key: SESSION_ENC_KEY
+        generateValue: true  # encrypts the personal-account session
+      - key: TG_API_ID
+        sync: false          # optional: can be entered in the Mini App instead
+      - key: TG_API_HASH
+        sync: false
       - key: FETCH_INTERVAL_MINUTES
         value: "60"
       - key: DATABASE_URL
