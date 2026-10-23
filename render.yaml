@@ -30,6 +30,16 @@ services:
         sync: false          # optional: can be entered in the Mini App instead
       - key: TG_API_HASH
         sync: false
+      - key: SERPER_API_KEY
+        sync: false
+      - key: BRAVE_API_KEY
+        sync: false
+      - key: X_BEARER_TOKEN
+        sync: false
+      - key: TWITTERAPI_IO_KEY
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
       - key: FETCH_INTERVAL_MINUTES
         value: "60"
       - key: DATABASE_URL
