@@ -28,6 +28,15 @@ class Settings(BaseSettings):
     # Channel the admin may publish to, e.g. @my_web3_jobs or -1001234567890
     channel_id: str = Field(default="", alias="CHANNEL_ID")
 
+    # --- Personal Telegram account (MTProto user client) ---
+    # From https://my.telegram.org -> API development tools. Optional here: the owner can
+    # also enter them once in the Mini App (stored encrypted).
+    tg_api_id: str = Field(default="", alias="TG_API_ID")
+    tg_api_hash: str = Field(default="", alias="TG_API_HASH")
+    # Key material used to encrypt the personal-account session in the database.
+    # If empty, WEBHOOK_SECRET is used. Changing it forces a new login.
+    session_enc_key_raw: str = Field(default="", alias="SESSION_ENC_KEY")
+
     # --- Data ---
     database_url: str = Field(default="sqlite+aiosqlite:///./data/jobs.db", alias="DATABASE_URL")
     fetch_interval_minutes: int = Field(default=60, alias="FETCH_INTERVAL_MINUTES")
@@ -55,6 +64,10 @@ class Settings(BaseSettings):
             if part.lstrip("-").isdigit():
                 out.add(int(part))
         return out
+
+    @property
+    def session_enc_key(self) -> str:
+        return self.session_enc_key_raw or self.webhook_secret
 
     @property
     def webapp_url(self) -> str:
