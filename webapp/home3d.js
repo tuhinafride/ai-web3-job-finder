@@ -200,6 +200,10 @@
   const cv = mk("canvas", "h3d-bg"); cv.setAttribute("aria-hidden", "true");
   document.body.insertBefore(cv, document.body.firstChild);
   const ctx = cv.getContext("2d", { alpha: false });
+  // overlay: thin copy of the network drawn ABOVE the content (screen blend, low opacity, no clicks)
+  const ov = mk("canvas", "h3d-ov"); ov.setAttribute("aria-hidden", "true");
+  document.body.appendChild(ov);
+  const octx = ov.getContext("2d");
   let Wd = 0, Ht = 0, dpr = 1, nodes = [], edges = [], cubes = [], pulses = [], parts = [], bgImg = null, glow = null, glowG = null;
   let rot = 0, tilt = 0.32, raf = 0, last = 0, slowFrames = 0, ftAvg = 16;
 
@@ -231,10 +235,12 @@
     Wd = window.innerWidth; Ht = window.innerHeight;
     cv.width = Math.round(Wd * dpr); cv.height = Math.round(Ht * dpr);
     cv.style.width = Wd + "px"; cv.style.height = Ht + "px";
+    ov.width = Math.round(Wd * dpr / 2); ov.height = Math.round(Ht * dpr / 2);
+    ov.style.width = Wd + "px"; ov.style.height = Ht + "px";
     const rawDpr = window.devicePixelRatio || 1;
     const area = Wd * Ht;
-    let n = area / 7000 * (rawDpr >= 3 ? 0.7 : rawDpr >= 2 ? 0.85 : 1) * H.quality;
-    n = Math.round(Math.max(28, Math.min(120, n)));
+    let n = area / 3200 * (rawDpr >= 3 ? 0.7 : rawDpr >= 2 ? 0.85 : 1) * H.quality;
+    n = Math.round(Math.max(55, Math.min(220, n)));
     H.nodes = n;
     const R = Math.min(Wd, Ht) * 0.62;
     nodes = [];
@@ -338,6 +344,7 @@
     }
     ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
     for (const p of cubes) drawCube(p, slow ? 0 : t);
+    if (H.frames % 2 === 0) { octx.clearRect(0, 0, ov.width, ov.height); octx.drawImage(cv, 0, 0, ov.width, ov.height); }
     H.frames++;
     // adaptive quality: if frames are slow for ~2s, rebuild with fewer nodes/particles
     ftAvg = ftAvg * 0.95 + dt * 0.05;
