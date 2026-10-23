@@ -11,4 +11,8 @@ os.environ.update({
     "ADMIN_IDS": "999",
     "CHANNEL_ID": "@test_channel",
     "PUBLIC_BASE_URL": "",
+    "ADMIN_TELEGRAM_IDS": "1000",
+    "BOT_USERNAME": "Test_jobs_bot",
+    "RATE_LIMIT_IP_PER_MIN": "1000000",
+    "RATE_LIMIT_USER_PER_MIN": "100000",
 })
